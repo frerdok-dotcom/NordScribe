@@ -49,12 +49,23 @@ class NordScribeApp(ctk.CTk):
         self.txt_transcript = ctk.CTkTextbox(self.left_frame, wrap="word", font=ctk.CTkFont(size=14))
         self.txt_transcript.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.btn_load_audio = ctk.CTkButton(self.left_frame, text="Загрузить аудио", command=self.start_transcription_thread)
+        # Кнопка загрузки аудио файла (синяя, стандартная)
+        self.btn_load_audio = ctk.CTkButton(self.left_frame, text="📁 Загрузить аудиофайл", command=self.start_transcription_thread, height=40)
         self.btn_load_audio.pack(pady=10)
         
-        # Кнопка записи с микрофона
-        self.btn_record_mic = ctk.CTkButton(self.left_frame, text="🎤 Записать с микрофона", command=self.toggle_recording, fg_color="#e74c3c")
+        # --- ИСПРАВЛЕННАЯ КНОПКА ЗАПИСИ С МИКРОФОНА ---
+        # Красный цвет в покое, темно-красный при наведении, жирный шрифт
+        self.btn_record_mic = ctk.CTkButton(
+            self.left_frame, 
+            text="🎤 Записать с микрофона", 
+            command=self.toggle_recording, 
+            fg_color="#D32F2F",          # Красный цвет в покое
+            hover_color="#B71C1C",       # Темно-красный при наведении
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
         self.btn_record_mic.pack(pady=5)
+        # ---------------------------------------------
 
         # Индикатор прогресса (пока скрыт или в нулевом положении)
         self.progress_bar = ctk.CTkProgressBar(self.left_frame)
@@ -145,8 +156,14 @@ class NordScribeApp(ctk.CTk):
         self.is_recording = True
         self.audio_data = []
         self.record_duration = 0
-        self.btn_record_mic.configure(text="⏹ Остановить запись", fg_color="#27ae60")
-        self.lbl_status.configure(text="Идет запись... Нажмите 'Остановить запись' когда закончите")
+        
+        # Обновление UI кнопки: меняем текст и цвет на более темный красный
+        self.btn_record_mic.configure(
+            text="⏹ Остановить запись",
+            fg_color="#B71C1C",      # Темнее при записи
+            hover_color="#8E0000"
+        )
+        self.lbl_status.configure(text="🔴 Запись идет... Нажмите 'Остановить запись' когда закончите", text_color="#D32F2F")
         self.txt_transcript.delete("1.0", "end")
         
         # Запуск потока записи
@@ -183,8 +200,14 @@ class NordScribeApp(ctk.CTk):
     def stop_recording(self):
         """Останавливает запись и начинает транскрибацию"""
         self.is_recording = False
-        self.btn_record_mic.configure(text="🎤 Записать с микрофона", fg_color="#e74c3c")
-        self.lbl_status.configure(text="Обработка записанного аудио...")
+        
+        # Возврат кнопки в исходное красное состояние
+        self.btn_record_mic.configure(
+            text="🎤 Записать с микрофона",
+            fg_color="#D32F2F",
+            hover_color="#B71C1C"
+        )
+        self.lbl_status.configure(text="Обработка записанного аудио...", text_color="gray")
         
         if self.audio_data:
             # Сохраняем записанное аудио во временный файл
