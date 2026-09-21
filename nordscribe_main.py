@@ -1,7 +1,10 @@
 import customtkinter as ctk
 import threading
 import time
-from typing import Callable
+import os
+from typing import Callable, Optional
+import whisper
+from tkinter import filedialog
 
 # Настройки внешнего вида
 ctk.set_appearance_mode("Dark")  # Темная тема
@@ -13,6 +16,11 @@ class NordScribeApp(ctk.CTk):
 
         self.title("NordScribe - Локальная Транскрибация")
         self.geometry("1100x700")
+
+        # Кэширование модели Whisper (чтобы не загружать каждый раз)
+        self.whisper_model: Optional[whisper.Whisper] = None
+        self.model_size = "tiny"  # Доступные: tiny, base, small, medium, large
+        # tiny - самый быстрый для тестов, base - хороший баланс скорости/точности
 
         # Сетка布局: 2 колонки
         self.grid_columnconfigure(0, weight=1)  # Левая колонка (Транскрибация)
@@ -58,31 +66,81 @@ class NordScribeApp(ctk.CTk):
 
     # --- ЛОГИКА МНОГОПОТОЧНОСТИ ---
 
+    def load_whisper_model(self):
+        """Загружает модель Whisper при первом запуске (в главном потоке для корректности)"""
+        if self.whisper_model is None:
+            # Загрузка модели происходит в том же потоке, где вызвана функция
+            # Для загрузки в фоне можно использовать threading, но тогда нужно блокировать UI
+            self.lbl_status.configure(text=f"Загрузка модели Whisper ({self.model_size})...")
+            self.update()  # Принудительное обновление UI перед загрузкой
+            try:
+                # Загрузка модели (кэшируется после первого раза в ~/.cache/whisper/)
+                self.whisper_model = whisper.load_model(self.model_size)
+                self.lbl_status.configure(text="Модель готова к работе")
+                return True
+            except Exception as e:
+                self.lbl_status.configure(text=f"Ошибка загрузки модели: {str(e)}")
+                return False
+        return True
+
     def start_transcription_thread(self):
         """Запускает тяжелую задачу Whisper в отдельном потоке"""
+        # Сначала загружаем модель, если еще не загружена
+        if not self.load_whisper_model():
+            return
+        
+        # Диалог выбора файла
+        file_path = filedialog.askopenfilename(
+            title="Выберите аудиофайл",
+            filetypes=[
+                ("Аудио файлы", "*.mp3 *.wav *.ogg *.flac *.m4a"),
+                ("Все файлы", "*.*")
+            ]
+        )
+        
+        if not file_path:
+            self.btn_load_audio.configure(state="normal")
+            self.lbl_status.configure(text="Файл не выбран")
+            return
+
         self.btn_load_audio.configure(state="disabled")
-        self.lbl_status.configure(text="Обработка аудио...")
+        self.lbl_status.configure(text=f"Обработка: {os.path.basename(file_path)}")
         self.progress_bar.set(0)
         
         # Очистка предыдущего результата
         self.txt_transcript.delete("1.0", "end")
 
-        thread = threading.Thread(target=self.run_whisper_simulation, daemon=True)
+        # Запуск транскрибации в отдельном потоке
+        thread = threading.Thread(target=self.run_whisper_transcription, args=(file_path,), daemon=True)
         thread.start()
 
-    def run_whisper_simulation(self):
-        """Симуляция работы Whisper (заменить на реальный вызов model.transcribe)"""
+    def run_whisper_transcription(self, file_path: str):
+        """Реальная транскрибация аудио с помощью Whisper"""
         try:
-            # Эмуляция процесса с прогрессом
-            for i in range(1, 101, 5):
-                time.sleep(0.1)  # Имитация вычислений
-                # Обновление UI должно происходить в главном потоке!
-                self.update_progressbar(i / 100)
+            # Whisper не предоставляет детальный прогресс для коротких файлов,
+            # но мы можем обновлять статус во время обработки
+            self.update_status("Начинаю распознавание...")
             
-            result_text = "Это пример распознанного текста. Здесь должен быть результат работы Whisper."
-            self.update_transcript_result(result_text)
+            # Выполняем транскрибацию
+            # verbose=None показывает прогресс в консоли, но мы используем свой UI
+            result = self.whisper_model.transcribe(
+                file_path,
+                language="ru",  # Можно сделать настраиваемым параметром
+                task="transcribe",
+                verbose=False
+            )
+            
+            # Получаем текст из результата
+            transcribed_text = result.get("text", "").strip()
+            
+            # Обновляем прогресс до 100%
+            self.update_progressbar(1.0)
+            
+            # Вставляем результат в текстовое поле
+            self.update_transcript_result(transcribed_text)
+            
         except Exception as e:
-            self.update_status(f"Ошибка: {str(e)}")
+            self.update_status(f"Ошибка транскрибации: {str(e)}")
         finally:
             self.btn_load_audio.configure(state="normal")
 
