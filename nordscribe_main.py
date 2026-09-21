@@ -34,62 +34,119 @@ class NordScribeApp(ctk.CTk):
         self.sample_rate = 16000  # Частота дискретизации для Whisper
         self.record_duration = 0  # Длительность текущей записи в секундах
 
-        # Сетка布局: 2 колонки
+        # Настройка сетки главного окна: 2 равные колонки
         self.grid_columnconfigure(0, weight=1)  # Левая колонка (Транскрибация)
         self.grid_columnconfigure(1, weight=1)  # Правая колонка (AI Анализ)
         self.grid_rowconfigure(0, weight=1)
 
         # === ЛЕВАЯ КОЛОНКА: ТРАНСКРИБАЦИЯ ===
-        self.left_frame = ctk.CTkFrame(self, corner_radius=0)
-        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.left_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=(15, 7), pady=15)
+        self.left_frame.grid_rowconfigure(0, weight=1)  # Текстовое поле растягивается
+        self.left_frame.grid_rowconfigure(1, weight=0)  # Панель управления фиксирована
 
-        self.lbl_transcript = ctk.CTkLabel(self.left_frame, text="Распознавание речи (Whisper)", font=ctk.CTkFont(size=16, weight="bold"))
-        self.lbl_transcript.pack(pady=10)
+        # Заголовок
+        self.lbl_transcript = ctk.CTkLabel(
+            self.left_frame, 
+            text="🎙️ Транскрибация (Whisper)", 
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        self.lbl_transcript.grid(row=0, column=0, sticky="nw", pady=(0, 10))
 
-        self.txt_transcript = ctk.CTkTextbox(self.left_frame, wrap="word", font=ctk.CTkFont(size=14))
-        self.txt_transcript.pack(fill="both", expand=True, padx=10, pady=10)
+        # Текстовое поле вывода (растягивается)
+        self.txt_transcript = ctk.CTkTextbox(
+            self.left_frame, 
+            wrap="word", 
+            font=ctk.CTkFont(size=14)
+        )
+        self.txt_transcript.grid(row=1, column=0, sticky="nsew", pady=(0, 15))
+
+        # --- НИЖНИЙ КОНТЕЙНЕР ЛЕВОЙ КОЛОНКИ (Кнопки + Прогресс) ---
+        self.frame_left_controls = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        self.frame_left_controls.grid(row=2, column=0, sticky="ew")
+        self.frame_left_controls.grid_columnconfigure((0, 1), weight=1)
 
         # Кнопка загрузки аудио файла (синяя, стандартная)
-        self.btn_load_audio = ctk.CTkButton(self.left_frame, text="📁 Загрузить аудиофайл", command=self.start_transcription_thread, height=40)
-        self.btn_load_audio.pack(pady=10)
-        
+        self.btn_load_audio = ctk.CTkButton(
+            self.frame_left_controls,
+            text="📁 Загрузить аудиофайл",
+            command=self.start_transcription_thread,
+            height=45,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.btn_load_audio.grid(row=0, column=0, padx=(0, 10), pady=(0, 10), sticky="ew")
+
         # --- ИСПРАВЛЕННАЯ КНОПКА ЗАПИСИ С МИКРОФОНА ---
         # Красный цвет в покое, темно-красный при наведении, жирный шрифт
         self.btn_record_mic = ctk.CTkButton(
-            self.left_frame, 
-            text="🎤 Записать с микрофона", 
-            command=self.toggle_recording, 
+            self.frame_left_controls,
+            text="🎤 Записать с микрофона",
+            command=self.toggle_recording,
             fg_color="#D32F2F",          # Красный цвет в покое
             hover_color="#B71C1C",       # Темно-красный при наведении
-            height=40,
+            height=45,
             font=ctk.CTkFont(size=14, weight="bold")
         )
-        self.btn_record_mic.pack(pady=5)
+        self.btn_record_mic.grid(row=0, column=1, padx=(10, 0), pady=(0, 10), sticky="ew")
         # ---------------------------------------------
 
-        # Индикатор прогресса (пока скрыт или в нулевом положении)
-        self.progress_bar = ctk.CTkProgressBar(self.left_frame)
-        self.progress_bar.pack(pady=10, padx=20, fill="x")
+        # Индикатор прогресса
+        self.progress_bar = ctk.CTkProgressBar(self.frame_left_controls, height=10)
+        self.progress_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 10))
         self.progress_bar.set(0)
 
-        self.lbl_status = ctk.CTkLabel(self.left_frame, text="Готов к работе", text_color="gray")
-        self.lbl_status.pack(pady=5)
+        self.lbl_status = ctk.CTkLabel(
+            self.frame_left_controls, 
+            text="Готов к работе", 
+            text_color="gray",
+            font=ctk.CTkFont(size=13)
+        )
+        self.lbl_status.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
         # === ПРАВАЯ КОЛОНКА: AI АНАЛИЗ ===
-        self.right_frame = ctk.CTkFrame(self, corner_radius=0)
-        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(7, 15), pady=15)
+        self.right_frame.grid_rowconfigure(0, weight=1)
+        self.right_frame.grid_rowconfigure(1, weight=0)
 
-        self.lbl_ai = ctk.CTkLabel(self.right_frame, text="AI Анализ (Ollama)", font=ctk.CTkFont(size=16, weight="bold"))
-        self.lbl_ai.pack(pady=10)
+        # Заголовок
+        self.lbl_ai = ctk.CTkLabel(
+            self.right_frame, 
+            text="🧠 ИИ Анализ (Ollama)", 
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        self.lbl_ai.grid(row=0, column=0, sticky="nw", pady=(0, 10))
 
-        self.txt_ai_output = ctk.CTkTextbox(self.right_frame, wrap="word", font=ctk.CTkFont(size=14))
-        self.txt_ai_output.pack(fill="both", expand=True, padx=10, pady=10)
+        # Текстовое поле вывода (растягивается)
+        self.txt_ai_output = ctk.CTkTextbox(
+            self.right_frame, 
+            wrap="word", 
+            font=ctk.CTkFont(size=14)
+        )
+        self.txt_ai_output.grid(row=1, column=0, sticky="nsew", pady=(0, 15))
 
-        self.entry_prompt = ctk.CTkEntry(self.right_frame, placeholder_text="Введите запрос к ИИ...")
-        self.entry_prompt.pack(fill="x", padx=10, pady=5)
+        # --- НИЖНИЙ КОНТЕЙНЕР ПРАВОЙ КОЛОНКИ (Ввод + Кнопка) ---
+        # Этот фрейм стоит на той же визуальной высоте, что и левый controls
+        self.frame_right_controls = ctk.CTkFrame(self.right_frame, fg_color="transparent")
+        self.frame_right_controls.grid(row=2, column=0, sticky="ew")
+        self.frame_right_controls.grid_columnconfigure(0, weight=1)
 
-        self.btn_analyze = ctk.CTkButton(self.right_frame, text="Анализировать текст", command=self.start_ai_thread)
-        self.btn_analyze.pack(pady=10)
+        self.entry_prompt = ctk.CTkEntry(
+            self.frame_right_controls,
+            placeholder_text="Введите запрос к ИИ...",
+            height=45,
+            font=ctk.CTkFont(size=14)
+        )
+        self.entry_prompt.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        self.btn_analyze = ctk.CTkButton(
+            self.frame_right_controls,
+            text="✨ Анализировать текст",
+            command=self.start_ai_thread,
+            height=45,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.btn_analyze.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
     # --- ЛОГИКА МНОГОПОТОЧНОСТИ ---
 
