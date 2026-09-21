@@ -2,9 +2,14 @@ import customtkinter as ctk
 import threading
 import time
 import os
+import tempfile
+import wave
 from typing import Callable, Optional
 import whisper
 from tkinter import filedialog
+import numpy as np
+import sounddevice as sd
+from scipy.io.wavfile import write
 
 # Настройки внешнего вида
 ctk.set_appearance_mode("Dark")  # Темная тема
@@ -21,6 +26,13 @@ class NordScribeApp(ctk.CTk):
         self.whisper_model: Optional[whisper.Whisper] = None
         self.model_size = "tiny"  # Доступные: tiny, base, small, medium, large
         # tiny - самый быстрый для тестов, base - хороший баланс скорости/точности
+        
+        # Переменные для записи с микрофона
+        self.is_recording = False
+        self.recording_thread = None
+        self.audio_data = []
+        self.sample_rate = 16000  # Частота дискретизации для Whisper
+        self.record_duration = 0  # Длительность текущей записи в секундах
 
         # Сетка布局: 2 колонки
         self.grid_columnconfigure(0, weight=1)  # Левая колонка (Транскрибация)
@@ -39,6 +51,10 @@ class NordScribeApp(ctk.CTk):
 
         self.btn_load_audio = ctk.CTkButton(self.left_frame, text="Загрузить аудио", command=self.start_transcription_thread)
         self.btn_load_audio.pack(pady=10)
+        
+        # Кнопка записи с микрофона
+        self.btn_record_mic = ctk.CTkButton(self.left_frame, text="🎤 Записать с микрофона", command=self.toggle_recording, fg_color="#e74c3c")
+        self.btn_record_mic.pack(pady=5)
 
         # Индикатор прогресса (пока скрыт или в нулевом положении)
         self.progress_bar = ctk.CTkProgressBar(self.left_frame)
@@ -113,8 +129,88 @@ class NordScribeApp(ctk.CTk):
         # Запуск транскрибации в отдельном потоке
         thread = threading.Thread(target=self.run_whisper_transcription, args=(file_path,), daemon=True)
         thread.start()
+    
+    def toggle_recording(self):
+        """Переключает состояние записи с микрофона"""
+        if self.is_recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
+    
+    def start_recording(self):
+        """Начинает запись с микрофона в отдельном потоке"""
+        if not self.load_whisper_model():
+            return
+        
+        self.is_recording = True
+        self.audio_data = []
+        self.record_duration = 0
+        self.btn_record_mic.configure(text="⏹ Остановить запись", fg_color="#27ae60")
+        self.lbl_status.configure(text="Идет запись... Нажмите 'Остановить запись' когда закончите")
+        self.txt_transcript.delete("1.0", "end")
+        
+        # Запуск потока записи
+        self.recording_thread = threading.Thread(target=self.record_audio, daemon=True)
+        self.recording_thread.start()
+    
+    def record_audio(self):
+        """Функция записи аудио в цикле"""
+        try:
+            stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=1,
+                dtype='int16',
+                callback=self.audio_callback
+            )
+            
+            with stream:
+                while self.is_recording:
+                    time.sleep(0.1)
+                    self.record_duration += 0.1
+                    # Обновляем статус каждую секунду
+                    if int(self.record_duration) % 1 == 0:
+                        self.update_status(f"Запись идет... {int(self.record_duration)} сек")
+                        
+        except Exception as e:
+            self.update_status(f"Ошибка записи: {str(e)}")
+            self.is_recording = False
+    
+    def audio_callback(self, indata, frames, time_info, status):
+        """Коллбэк для захвата аудио данных"""
+        if self.is_recording:
+            self.audio_data.append(indata.copy())
+    
+    def stop_recording(self):
+        """Останавливает запись и начинает транскрибацию"""
+        self.is_recording = False
+        self.btn_record_mic.configure(text="🎤 Записать с микрофона", fg_color="#e74c3c")
+        self.lbl_status.configure(text="Обработка записанного аудио...")
+        
+        if self.audio_data:
+            # Сохраняем записанное аудио во временный файл
+            try:
+                audio_data = np.concatenate(self.audio_data, axis=0)
+                
+                # Создаем временный WAV файл
+                temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                temp_path = temp_file.name
+                temp_file.close()
+                
+                # Записываем WAV файл
+                write(temp_path, self.sample_rate, audio_data)
+                
+                # Запускаем транскрибацию временного файла
+                thread = threading.Thread(target=self.run_whisper_transcription, args=(temp_path, True), daemon=True)
+                thread.start()
+                
+            except Exception as e:
+                self.update_status(f"Ошибка сохранения аудио: {str(e)}")
+                self.btn_record_mic.configure(state="normal")
+        else:
+            self.update_status("Аудио не записано")
+            self.btn_record_mic.configure(state="normal")
 
-    def run_whisper_transcription(self, file_path: str):
+    def run_whisper_transcription(self, file_path: str, is_temp_file: bool = False):
         """Реальная транскрибация аудио с помощью Whisper"""
         try:
             # Whisper не предоставляет детальный прогресс для коротких файлов,
@@ -139,10 +235,18 @@ class NordScribeApp(ctk.CTk):
             # Вставляем результат в текстовое поле
             self.update_transcript_result(transcribed_text)
             
+            # Удаляем временный файл, если это запись с микрофона
+            if is_temp_file and os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception as e:
+                    print(f"Не удалось удалить временный файл: {e}")
+            
         except Exception as e:
             self.update_status(f"Ошибка транскрибации: {str(e)}")
         finally:
             self.btn_load_audio.configure(state="normal")
+            self.btn_record_mic.configure(state="normal")
 
     def start_ai_thread(self):
         """Запускает задачу Ollama в отдельном потоке"""
