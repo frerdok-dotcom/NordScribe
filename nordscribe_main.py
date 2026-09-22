@@ -475,8 +475,8 @@ class NordScribeApp(ctk.CTk):
         try:
             # Получаем список локальных моделей через ollama.list()
             local_models_data = ollama.list()
-            # Извлекаем имена установленных моделей
-            installed_names = {model['name'] for model in local_models_data.get('models', [])}
+            # Извлекаем имена установленных моделей (безопасное получение ключа 'name')
+            installed_names = {model.get('name', 'unknown') for model in local_models_data.get('models', [])}
             
             # Список всех возможных моделей для отображения
             all_candidates = ["qwen2.5:1.5b", "qwen2.5:3b", "llama3.2", "mistral", "gemma:2b"]
