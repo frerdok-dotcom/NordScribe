@@ -187,7 +187,8 @@ class NordScribeApp(ctk.CTk):
             text="✨ Анализировать текст",
             command=self.start_ai_thread,
             height=45,
-            font=ctk.CTkFont(size=14, weight="bold")
+            font=ctk.CTkFont(size=14, weight="bold"),
+            state="disabled"  # Изначально заблокирована до проверки моделей
         )
         self.btn_analyze.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
@@ -389,11 +390,12 @@ class NordScribeApp(ctk.CTk):
 
     def check_local_models(self):
         """
-        Фоновая проверка установленных моделей Ollama.
-        Запрашивает список через API, форматирует его с иконками и обновляет меню.
-        Выполняется в отдельном потоке при старте.
+        Фоновая проверка установленных моделей Ollama с обработкой ошибок подключения.
+        Запускается в отдельном потоке при старте приложения.
         """
         if not OLLAMA_AVAILABLE:
+            self.after(0, lambda: self.llm_menu.configure(values=["⚠️ Библиотека ollama не установлена"]))
+            self.after(0, lambda: self.btn_analyze.configure(state="disabled"))
             return
             
         try:
@@ -423,25 +425,43 @@ class NordScribeApp(ctk.CTk):
                 # Устанавливаем значение по умолчанию (первая установленная или первая в списке)
                 default_val = next((m for m in formatted_list if m.startswith("🟢")), formatted_list[0])
                 self.llm_menu.set(default_val)
+                self.llm_var.set(default_val)
+                # Разблокируем кнопку анализа
+                self.btn_analyze.configure(state="normal")
                 
             self.after(0, update_menu)
 
         except Exception as e:
             print(f"[ОШИБКА Ollama] Не удалось получить список моделей: {e}")
-            # Обновляем меню с сообщением об ошибке
-            self.after(0, lambda: self.llm_menu.configure(values=["⚪ Ошибка подключения к Ollama"]))
+            # Обновляем меню с сообщением об ошибке и блокируем кнопку
+            def handle_error():
+                self.llm_menu.configure(values=["⚠️ Ошибка подключения к Ollama"])
+                self.llm_menu.set("⚠️ Ошибка подключения к Ollama")
+                self.llm_var.set("⚠️ Ошибка подключения к Ollama")
+                self.btn_analyze.configure(state="disabled")
+                self.lbl_status.configure(text="Ollama не подключен", text_color="red")
+            self.after(0, handle_error)
 
     def run_ollama_simulation(self, text, prompt):
         """
         Отправка текста на анализ в локальную LLM (Ollama).
-        Автоматически очищает имя модели от визуальных маркеров (эмодзи).
+        Автоматически очищает имя модели от визуальных маркеров (эмодзи) и проверяет статус подключения.
         """
         try:
             # Получаем выбранную модель из UI (с маркерами)
             selected_model_full = self.llm_var.get()
             
+            # Проверка: не выбрана ли ошибка подключения или отсутствующая библиотека
+            if "Ошибка подключения" in selected_model_full or "Библиотека" in selected_model_full:
+                self.update_status("Сначала запустите сервис Ollama или установите библиотеку", side="left")
+                self.update_ai_result("❌ Сервис Ollama недоступен. Убедитесь, что он запущен и библиотека установлена.")
+                return
+            
             # Очищаем имя модели от эмодзи и лишних символов, оставляем только системное имя
             clean_model_name = re.sub(r'[^\w.:]', '', selected_model_full).strip()
+            
+            if not clean_model_name:
+                raise ValueError("Не удалось определить имя модели")
             
             # Проверка доступности библиотеки
             if not OLLAMA_AVAILABLE:
@@ -451,7 +471,7 @@ class NordScribeApp(ctk.CTk):
                 return
 
             # Обновляем статус
-            self.update_status(f"Генерация ответа ({clean_model_name})...", side="right")
+            self.update_status(f"Генерация ответа ({clean_model_name})...", side="left")
             
             # Реальный вызов Ollama API с очищенным именем модели
             response_data = ollama.generate(
@@ -464,10 +484,10 @@ class NordScribeApp(ctk.CTk):
             self.update_ai_result(f"🤖 AI ({clean_model_name}):\n{result_text}")
             
         except Exception as e:
-            error_msg = f"Ошибка модели '{clean_model_name}': {str(e)}"
+            error_msg = f"Ошибка модели: {str(e)}"
             print(error_msg)
             self.update_ai_result(f"❌ {error_msg}")
-            self.update_status("Ошибка генерации", side="right")
+            self.update_status("Ошибка генерации", side="left")
         finally:
             self.btn_analyze.configure(state="normal")
 
