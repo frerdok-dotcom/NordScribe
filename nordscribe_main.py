@@ -239,21 +239,33 @@ class NordScribeApp(ctk.CTk):
 
     # --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ WHISPER MENU ---
 
+    def _clean_name(self, display_name: str) -> str:
+        """
+        Удаляет префиксы эмодзи (🟢, 🔵, ⚪, ✅, ⬇️) и лишние пробелы из имени модели.
+        Пример: '🟢 base' -> 'base'
+        """
+        if not display_name:
+            return ""
+        
+        # Удаляем известные маркеры
+        clean = display_name.replace("🟢 ", "").replace("🔵 ", "").replace("⚪ ", "").replace("✅ ", "").replace("⬇️ ", "")
+        return clean.strip()
+
     def _build_whisper_display_list(self) -> List[str]:
         """Формирует список моделей с цветными индикаторами статуса для отображения в меню."""
         options = []
         for model in self.base_whisper_names:
             if model in self.downloaded_whisper_models:
-                # Зеленая галочка для установленных моделей
-                options.append(f"{model} ✅")
+                # Зеленый круг для установленных моделей
+                options.append(f"🟢 {model}")
             else:
-                # Синяя стрелка для моделей, требующих загрузки
-                options.append(f"{model} ⬇️")
+                # Синий круг для моделей, требующих загрузки
+                options.append(f"🔵 {model}")
         return options
 
     def _extract_whisper_model_name(self, display_string: str) -> str:
         """Извлекает чистое имя модели из строки отображения (убирает эмодзи)."""
-        return display_string.split()[0]
+        return self._clean_name(display_string)
 
     def _on_whisper_model_change(self, choice: str):
         """Обработчик выбора модели Whisper из меню. Сохраняет чистое имя модели."""
@@ -532,7 +544,7 @@ class NordScribeApp(ctk.CTk):
                 return
             
             # Очищаем имя модели от эмодзи и лишних символов, оставляем только системное имя
-            clean_model_name = re.sub(r'[^\w.:]', '', selected_model_full).strip()
+            clean_model_name = self._clean_name(selected_model_full)
             
             if not clean_model_name:
                 raise ValueError("Не удалось определить имя модели")
