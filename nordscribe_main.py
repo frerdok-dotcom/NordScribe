@@ -4,7 +4,8 @@ import time
 import os
 import tempfile
 import wave
-from typing import Callable, Optional
+from pathlib import Path
+from typing import Callable, Optional, Set, List
 import whisper
 from tkinter import filedialog
 import numpy as np
@@ -22,6 +23,44 @@ except ImportError:
 ctk.set_appearance_mode("Dark")  # Темная тема
 ctk.set_default_color_theme("blue")
 
+
+def get_downloaded_whisper_models() -> Set[str]:
+    """
+    Проверяет наличие скачанных моделей Whisper в кэше ~/.cache/whisper/.
+    Возвращает множество имен полностью загруженных моделей.
+    """
+    cache_dir = Path.home() / ".cache" / "whisper"
+    official_models = [
+        'tiny', 'tiny.en',
+        'base', 'base.en',
+        'small', 'small.en',
+        'medium', 'medium.en',
+        'large', 'large-v1', 'large-v2', 'large-v3', 'turbo'
+    ]
+    downloaded = set()
+    
+    if not cache_dir.exists():
+        return downloaded
+
+    try:
+        files = list(cache_dir.glob("*.pt"))
+    except PermissionError:
+        return downloaded
+
+    for file_path in files:
+        filename = file_path.name
+        model_key = filename[:-3]  # Убираем расширение .pt
+        
+        for official_name in official_models:
+            if model_key == official_name:
+                downloaded.add(official_name)
+                # Для large-* версий также добавляем базовое имя 'large'
+                if official_name.startswith('large'):
+                    downloaded.add('large')
+                break
+                
+    return downloaded
+
 class NordScribeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -35,6 +74,11 @@ class NordScribeApp(ctk.CTk):
         # Переменные для выбора моделей через UI
         self.whisper_var = ctk.StringVar(value="base")
         self.llm_var = ctk.StringVar(value="qwen2.5:1.5b")
+        
+        # Получаем список скачанных моделей Whisper
+        self.downloaded_whisper_models = get_downloaded_whisper_models()
+        self.base_whisper_names = ['tiny', 'base', 'small', 'medium', 'large']
+        self.whisper_display_options = self._build_whisper_display_list()
         
         # Переменные для записи с микрофона
         self.is_recording = False
@@ -66,8 +110,9 @@ class NordScribeApp(ctk.CTk):
         self.whisper_menu = ctk.CTkOptionMenu(
             self.settings_frame,
             variable=self.whisper_var,
-            values=["tiny", "base", "small", "medium", "large"],
-            width=120,
+            values=self.whisper_display_options,
+            command=self._on_whisper_model_change,
+            width=140,
             height=30
         )
         self.whisper_menu.grid(row=0, column=1, sticky="w", padx=(0, 20))
@@ -192,12 +237,39 @@ class NordScribeApp(ctk.CTk):
         )
         self.btn_analyze.grid(row=1, column=0, sticky="ew", pady=(0, 5))
 
+    # --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ WHISPER MENU ---
+
+    def _build_whisper_display_list(self) -> List[str]:
+        """Формирует список моделей с маркерами статуса для отображения в меню."""
+        options = []
+        for model in self.base_whisper_names:
+            if model in self.downloaded_whisper_models:
+                options.append(f"{model} 💾")  # Установлена локально
+            else:
+                options.append(f"{model} ☁️")  # Требуется загрузка
+        return options
+
+    def _extract_whisper_model_name(self, display_string: str) -> str:
+        """Извлекает чистое имя модели из строки отображения (убирает эмодзи)."""
+        return display_string.split()[0]
+
+    def _on_whisper_model_change(self, choice: str):
+        """Обработчик выбора модели Whisper из меню. Сохраняет чистое имя модели."""
+        clean_name = self._extract_whisper_model_name(choice)
+        self.whisper_var.set(clean_name)
+        is_downloaded = clean_name in self.downloaded_whisper_models
+        
+        if is_downloaded:
+            self.lbl_status.configure(text=f"Выбрана модель '{clean_name}' (Локально)", text_color="green")
+        else:
+            self.lbl_status.configure(text=f"Выбрана модель '{clean_name}' (Будет загружена при использовании)", text_color="orange")
+
     # --- ЛОГИКА МНОГОПОТОЧНОСТИ ---
 
     def load_whisper_model(self):
         """Загружает модель Whisper при первом запуске с выбранной в UI моделью"""
         if self.whisper_model is None:
-            # Получаем выбранную модель из переменной UI
+            # Получаем выбранную модель из переменной UI (уже очищенное имя)
             selected_model = self.whisper_var.get()
             self.lbl_status.configure(text=f"Загрузка модели Whisper ({selected_model})...")
             self.update()  # Принудительное обновление UI перед загрузкой
