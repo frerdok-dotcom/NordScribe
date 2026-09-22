@@ -24,8 +24,10 @@ class NordScribeApp(ctk.CTk):
 
         # Кэширование модели Whisper (чтобы не загружать каждый раз)
         self.whisper_model: Optional[whisper.Whisper] = None
-        self.model_size = "tiny"  # Доступные: tiny, base, small, medium, large
-        # tiny - самый быстрый для тестов, base - хороший баланс скорости/точности
+        
+        # Переменные для выбора моделей через UI
+        self.whisper_var = ctk.StringVar(value="base")
+        self.llm_var = ctk.StringVar(value="qwen2.5:1.5b")
         
         # Переменные для записи с микрофона
         self.is_recording = False
@@ -34,33 +36,71 @@ class NordScribeApp(ctk.CTk):
         self.sample_rate = 16000  # Частота дискретизации для Whisper
         self.record_duration = 0  # Длительность текущей записи в секундах
 
-        # Настройка сетки главного окна: 2 колонки и 3 строки
+        # Настройка сетки главного окна: 2 колонки и 4 строки
         self.grid_columnconfigure(0, weight=1)  # Левая колонка (Транскрибация)
         self.grid_columnconfigure(1, weight=1)  # Правая колонка (AI Анализ)
-        self.grid_rowconfigure(0, weight=0)     # Строка 0: Заголовки (фиксировано)
-        self.grid_rowconfigure(1, weight=1)     # Строка 1: Текстовые поля (растягиваются)
-        self.grid_rowconfigure(2, weight=0)     # Строка 2: Панели управления (фиксировано)
+        self.grid_rowconfigure(0, weight=0)     # Строка 0: Панель настроек (фиксировано)
+        self.grid_rowconfigure(1, weight=0)     # Строка 1: Заголовки (фиксировано)
+        self.grid_rowconfigure(2, weight=1)     # Строка 2: Текстовые поля (растягиваются)
+        self.grid_rowconfigure(3, weight=0)     # Строка 3: Панели управления (фиксировано)
+
+        # === ВЕРХНЯЯ ПАНЕЛЬ НАСТРОЕК (СТРОКА 0) ===
+        self.settings_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.settings_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=15, pady=(10, 5))
+        self.settings_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        # Метка и выбор модели Whisper
+        ctk.CTkLabel(
+            self.settings_frame,
+            text="Модель Whisper:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=0, column=0, sticky="e", padx=(0, 5))
+        
+        self.whisper_menu = ctk.CTkOptionMenu(
+            self.settings_frame,
+            variable=self.whisper_var,
+            values=["tiny", "base", "small", "medium", "large"],
+            width=120,
+            height=30
+        )
+        self.whisper_menu.grid(row=0, column=1, sticky="w", padx=(0, 20))
+        
+        # Метка и выбор модели Ollama
+        ctk.CTkLabel(
+            self.settings_frame,
+            text="Модель Ollama:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=0, column=2, sticky="e", padx=(0, 5))
+        
+        self.llm_menu = ctk.CTkOptionMenu(
+            self.settings_frame,
+            variable=self.llm_var,
+            values=["qwen2.5:1.5b", "qwen2.5:3b", "llama3.2", "mistral", "gemma:2b"],
+            width=140,
+            height=30
+        )
+        self.llm_menu.grid(row=0, column=3, sticky="w")
 
         # === ЛЕВАЯ КОЛОНКА: ТРАНСКРИБАЦИЯ ===
-        # Заголовок (строка 0)
+        # Заголовок (строка 1)
         self.lbl_transcript = ctk.CTkLabel(
             self, 
             text="🎙️ Транскрибация (Whisper)", 
             font=ctk.CTkFont(size=18, weight="bold")
         )
-        self.lbl_transcript.grid(row=0, column=0, sticky="nw", padx=(15, 7), pady=(15, 10))
+        self.lbl_transcript.grid(row=1, column=0, sticky="nw", padx=(15, 7), pady=(5, 10))
 
-        # Текстовое поле вывода (строка 1, растягивается)
+        # Текстовое поле вывода (строка 2, растягивается)
         self.txt_transcript = ctk.CTkTextbox(
             self, 
             wrap="word", 
             font=ctk.CTkFont(size=14)
         )
-        self.txt_transcript.grid(row=1, column=0, sticky="nsew", padx=(15, 7), pady=(0, 15))
+        self.txt_transcript.grid(row=2, column=0, sticky="nsew", padx=(15, 7), pady=(0, 15))
 
-        # --- НИЖНИЙ КОНТЕЙНЕР ЛЕВОЙ КОЛОНКИ (Кнопки + Прогресс) - СТРОКА 2 ---
+        # --- НИЖНИЙ КОНТЕЙНЕР ЛЕВОЙ КОЛОНКИ (Кнопки + Прогресс) - СТРОКА 3 ---
         self.frame_left_controls = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_left_controls.grid(row=2, column=0, sticky="ew", padx=(15, 7), pady=(0, 15))
+        self.frame_left_controls.grid(row=3, column=0, sticky="ew", padx=(15, 7), pady=(0, 15))
         self.frame_left_controls.grid_columnconfigure((0, 1), weight=1)
 
         # Кнопка загрузки аудио файла (синяя, стандартная)
@@ -101,26 +141,26 @@ class NordScribeApp(ctk.CTk):
         self.lbl_status.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
         # === ПРАВАЯ КОЛОНКА: AI АНАЛИЗ ===
-        # Заголовок (строка 0)
+        # Заголовок (строка 1)
         self.lbl_ai = ctk.CTkLabel(
             self, 
             text="🧠 ИИ Анализ (Ollama)", 
             font=ctk.CTkFont(size=18, weight="bold")
         )
-        self.lbl_ai.grid(row=0, column=1, sticky="nw", padx=(7, 15), pady=(15, 10))
+        self.lbl_ai.grid(row=1, column=1, sticky="nw", padx=(7, 15), pady=(5, 10))
 
-        # Текстовое поле вывода (строка 1, растягивается)
+        # Текстовое поле вывода (строка 2, растягивается)
         self.txt_ai_output = ctk.CTkTextbox(
             self, 
             wrap="word", 
             font=ctk.CTkFont(size=14)
         )
-        self.txt_ai_output.grid(row=1, column=1, sticky="nsew", padx=(7, 15), pady=(0, 15))
+        self.txt_ai_output.grid(row=2, column=1, sticky="nsew", padx=(7, 15), pady=(0, 15))
 
-        # --- НИЖНИЙ КОНТЕЙНЕР ПРАВОЙ КОЛОНКИ (Ввод + Кнопка) - СТРОКА 2 ---
+        # --- НИЖНИЙ КОНТЕЙНЕР ПРАВОЙ КОЛОНКИ (Ввод + Кнопка) - СТРОКА 3 ---
         # Этот фрейм стоит на той же визуальной высоте, что и левый controls
         self.frame_right_controls = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_right_controls.grid(row=2, column=1, sticky="ew", padx=(7, 15), pady=(0, 15))
+        self.frame_right_controls.grid(row=3, column=1, sticky="ew", padx=(7, 15), pady=(0, 15))
         self.frame_right_controls.grid_columnconfigure(0, weight=1)
 
         self.entry_prompt = ctk.CTkEntry(
@@ -143,15 +183,15 @@ class NordScribeApp(ctk.CTk):
     # --- ЛОГИКА МНОГОПОТОЧНОСТИ ---
 
     def load_whisper_model(self):
-        """Загружает модель Whisper при первом запуске (в главном потоке для корректности)"""
+        """Загружает модель Whisper при первом запуске с выбранной в UI моделью"""
         if self.whisper_model is None:
-            # Загрузка модели происходит в том же потоке, где вызвана функция
-            # Для загрузки в фоне можно использовать threading, но тогда нужно блокировать UI
-            self.lbl_status.configure(text=f"Загрузка модели Whisper ({self.model_size})...")
+            # Получаем выбранную модель из переменной UI
+            selected_model = self.whisper_var.get()
+            self.lbl_status.configure(text=f"Загрузка модели Whisper ({selected_model})...")
             self.update()  # Принудительное обновление UI перед загрузкой
             try:
                 # Загрузка модели (кэшируется после первого раза в ~/.cache/whisper/)
-                self.whisper_model = whisper.load_model(self.model_size)
+                self.whisper_model = whisper.load_model(selected_model)
                 self.lbl_status.configure(text="Модель готова к работе")
                 return True
             except Exception as e:
@@ -337,10 +377,16 @@ class NordScribeApp(ctk.CTk):
         thread.start()
 
     def run_ollama_simulation(self, text, prompt):
-        """Симуляция работы Ollama (заменить на ollama.generate)"""
+        """Симуляция работы Ollama (заменить на ollama.generate с выбранной моделью)"""
         try:
+            # Получаем выбранную модель из UI
+            selected_llm = self.llm_var.get()
+            
+            # Здесь будет реальный вызов: 
+            # response = ollama.generate(model=selected_llm, prompt=f"{prompt}:\n{text}")
+            
             time.sleep(2)  # Имитация задержки сети/вычислений
-            response = f"AI ответ на запрос '{prompt}' по тексту: {text[:50]}..."
+            response = f"AI ({selected_llm}) ответ на запрос '{prompt}' по тексту: {text[:50]}..."
             self.update_ai_result(response)
         except Exception as e:
             self.update_status(f"Ошибка AI: {str(e)}", side="right")
