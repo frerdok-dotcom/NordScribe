@@ -10,6 +10,13 @@ from tkinter import filedialog
 import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write
+import re
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    print("Предупреждение: библиотека ollama не установлена. Функции ИИ-анализа будут работать в режиме симуляции.")
 
 # Настройки внешнего вида
 ctk.set_appearance_mode("Dark")  # Темная тема
@@ -80,6 +87,10 @@ class NordScribeApp(ctk.CTk):
             height=30
         )
         self.llm_menu.grid(row=0, column=3, sticky="w")
+        
+        # Запуск проверки установленных моделей Ollama в фоновом потоке
+        if OLLAMA_AVAILABLE:
+            threading.Thread(target=self.check_local_models, daemon=True).start()
 
         # === ЛЕВАЯ КОЛОНКА: ТРАНСКРИБАЦИЯ ===
         # Заголовок (строка 1)
@@ -376,20 +387,87 @@ class NordScribeApp(ctk.CTk):
         thread = threading.Thread(target=self.run_ollama_simulation, args=(text_to_analyze, prompt), daemon=True)
         thread.start()
 
-    def run_ollama_simulation(self, text, prompt):
-        """Симуляция работы Ollama (заменить на ollama.generate с выбранной моделью)"""
+    def check_local_models(self):
+        """
+        Фоновая проверка установленных моделей Ollama.
+        Запрашивает список через API, форматирует его с иконками и обновляет меню.
+        Выполняется в отдельном потоке при старте.
+        """
+        if not OLLAMA_AVAILABLE:
+            return
+            
         try:
-            # Получаем выбранную модель из UI
-            selected_llm = self.llm_var.get()
+            # Получаем список локальных моделей через ollama.list()
+            local_models_data = ollama.list()
+            # Извлекаем имена установленных моделей
+            installed_names = {model['name'] for model in local_models_data.get('models', [])}
             
-            # Здесь будет реальный вызов: 
-            # response = ollama.generate(model=selected_llm, prompt=f"{prompt}:\n{text}")
+            # Список всех возможных моделей для отображения
+            all_candidates = ["qwen2.5:1.5b", "qwen2.5:3b", "llama3.2", "mistral", "gemma:2b"]
             
-            time.sleep(2)  # Имитация задержки сети/вычислений
-            response = f"AI ({selected_llm}) ответ на запрос '{prompt}' по тексту: {text[:50]}..."
-            self.update_ai_result(response)
+            # Формируем список с маркерами статуса
+            formatted_list = []
+            for model_name in all_candidates:
+                if model_name in installed_names:
+                    formatted_list.append(f"🟢 {model_name}")  # Установлена
+                else:
+                    formatted_list.append(f"⚪ {model_name}")  # Не установлена
+            
+            # Если список пуст, добавляем сообщение об ошибке
+            if not formatted_list:
+                formatted_list = ["⚪ Нет доступных моделей"]
+
+            # Безопасное обновление UI через after()
+            def update_menu():
+                self.llm_menu.configure(values=formatted_list)
+                # Устанавливаем значение по умолчанию (первая установленная или первая в списке)
+                default_val = next((m for m in formatted_list if m.startswith("🟢")), formatted_list[0])
+                self.llm_menu.set(default_val)
+                
+            self.after(0, update_menu)
+
         except Exception as e:
-            self.update_status(f"Ошибка AI: {str(e)}", side="right")
+            print(f"[ОШИБКА Ollama] Не удалось получить список моделей: {e}")
+            # Обновляем меню с сообщением об ошибке
+            self.after(0, lambda: self.llm_menu.configure(values=["⚪ Ошибка подключения к Ollama"]))
+
+    def run_ollama_simulation(self, text, prompt):
+        """
+        Отправка текста на анализ в локальную LLM (Ollama).
+        Автоматически очищает имя модели от визуальных маркеров (эмодзи).
+        """
+        try:
+            # Получаем выбранную модель из UI (с маркерами)
+            selected_model_full = self.llm_var.get()
+            
+            # Очищаем имя модели от эмодзи и лишних символов, оставляем только системное имя
+            clean_model_name = re.sub(r'[^\w.:]', '', selected_model_full).strip()
+            
+            # Проверка доступности библиотеки
+            if not OLLAMA_AVAILABLE:
+                time.sleep(2)
+                response = f"[Симуляция] AI ({clean_model_name}) ответ на запрос '{prompt}' по тексту: {text[:50]}..."
+                self.update_ai_result(response)
+                return
+
+            # Обновляем статус
+            self.update_status(f"Генерация ответа ({clean_model_name})...", side="right")
+            
+            # Реальный вызов Ollama API с очищенным именем модели
+            response_data = ollama.generate(
+                model=clean_model_name,
+                prompt=f"{prompt}:\n{text}"
+            )
+            
+            # Извлекаем текст ответа
+            result_text = response_data.get('response', 'Нет ответа')
+            self.update_ai_result(f"🤖 AI ({clean_model_name}):\n{result_text}")
+            
+        except Exception as e:
+            error_msg = f"Ошибка модели '{clean_model_name}': {str(e)}"
+            print(error_msg)
+            self.update_ai_result(f"❌ {error_msg}")
+            self.update_status("Ошибка генерации", side="right")
         finally:
             self.btn_analyze.configure(state="normal")
 
