@@ -240,13 +240,15 @@ class NordScribeApp(ctk.CTk):
     # --- ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ WHISPER MENU ---
 
     def _build_whisper_display_list(self) -> List[str]:
-        """Формирует список моделей с маркерами статуса для отображения в меню."""
+        """Формирует список моделей с цветными индикаторами статуса для отображения в меню."""
         options = []
         for model in self.base_whisper_names:
             if model in self.downloaded_whisper_models:
-                options.append(f"{model} 💾")  # Установлена локально
+                # Зеленая галочка для установленных моделей
+                options.append(f"{model} ✅")
             else:
-                options.append(f"{model} ☁️")  # Требуется загрузка
+                # Синяя стрелка для моделей, требующих загрузки
+                options.append(f"{model} ⬇️")
         return options
 
     def _extract_whisper_model_name(self, display_string: str) -> str:
