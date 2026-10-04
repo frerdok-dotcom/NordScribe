@@ -38,3 +38,9 @@ htmlcov/
 .mypy_cache/
 .pytest_cache/
 ```
+
+# Временные файлы тестов
+tests/_tmp/
+
+# Временный каталог pip (не удаляется из-за прав)
+_pip_tmp/

@@ -1,0 +1,112 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nordscribe"
+version = "1.0.0"
+description = "Локальная транскрибация аудио через OpenAI Whisper с менеджером моделей"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "customtkinter>=5.2.0",
+    "openai-whisper>=20231117",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+nordscribe = "main:main"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "download_manager",
+    "whisper_worker",
+    "gui_components",
+    "model_labels",
+    "settings",
+    "preflight",
+    "history",
+]
+
+# ---------------------------------------------------------------------------
+# ruff: линтер и форматирование
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+exclude = [".git", ".codegraph", "__pycache__", "tests/_tmp"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort: порядок импортов
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+    "RUF",  # правила самого ruff
+]
+ignore = [
+    "E501",   # длину строк контролирует форматтер
+    "B008",   # вызов функции в значении по умолчанию (нужен для dataclass/CLI)
+    "RUF001", # кириллица в строках — это нормально для русскоязычного UI
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# В тестах допустимы длинные строки и «магические» значения.
+"tests/*" = ["E501", "SIM117"]
+# Локальный импорт sounddevice нужен, чтобы проверка не падала без PortAudio.
+"preflight.py" = ["PLC0415"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# mypy: статическая проверка типов
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false   # подавления в тестах могут оказаться лишними
+#                                при другой версии библиотек; включим после
+#                                первого прогона mypy в CI
+no_implicit_optional = true
+strict_equality = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+show_error_codes = true
+# Сторонние библиотеки без стабов: whisper, sounddevice, customtkinter.
+ignore_missing_imports = true
+exclude = ["tests/_tmp"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+# В тестах допустимы частичные аннотации: они проверяют поведение, а не типы.
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
