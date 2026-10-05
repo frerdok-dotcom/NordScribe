@@ -14,7 +14,6 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import download_manager as dm
 
@@ -51,8 +50,7 @@ def _check_ffmpeg() -> CheckResult:
     return CheckResult(
         "ffmpeg",
         False,
-        "не найден в PATH — доступны только WAV-файлы "
-        "(установите ffmpeg и добавьте его в PATH)",
+        "не найден в PATH — доступны только WAV-файлы (установите ffmpeg и добавьте его в PATH)",
         fatal=False,
     )
 
@@ -65,7 +63,9 @@ def _check_cache(cache_dir: Path) -> CheckResult:
             pass
     except OSError as exc:
         return CheckResult(
-            "кэш моделей", False, f"{cache_dir} недоступен для записи: {exc}",
+            "кэш моделей",
+            False,
+            f"{cache_dir} недоступен для записи: {exc}",
             fatal=True,
         )
     return CheckResult("кэш моделей", True, str(cache_dir), fatal=True)
@@ -77,7 +77,7 @@ def _check_audio_input() -> CheckResult:
         import sounddevice as sd
 
         devices = sd.query_devices()
-    except Exception as exc:  # noqa: BLE001 — библиотека или драйвер могут отказать
+    except Exception as exc:
         return CheckResult(
             "микрофон", False, f"не удалось опросить устройства: {exc}", fatal=False
         )
@@ -85,19 +85,20 @@ def _check_audio_input() -> CheckResult:
     inputs = [d for d in devices if d.get("max_input_channels", 0) > 0]
     if not inputs:
         return CheckResult(
-            "микрофон", False,
+            "микрофон",
+            False,
             "устройства ввода не найдены — запись с микрофона недоступна",
             fatal=False,
         )
     try:
         default = sd.query_devices(kind="input")
         name = str(default.get("name", "по умолчанию"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         name = str(inputs[0].get("name", "по умолчанию"))
     return CheckResult("микрофон", True, name, fatal=False)
 
 
-def run_checks(cache_dir: Optional[Path] = None) -> list[CheckResult]:
+def run_checks(cache_dir: Path | None = None) -> list[CheckResult]:
     """
     Выполняет все проверки окружения.
 
@@ -129,6 +130,4 @@ def summarize(results: list[CheckResult]) -> str:
         return ""
     if len(problems) == 1:
         return f"{problems[0].name}: {problems[0].detail}"
-    return f"проблемы окружения ({len(problems)}): " + "; ".join(
-        p.name for p in problems
-    )
+    return f"проблемы окружения ({len(problems)}): " + "; ".join(p.name for p in problems)

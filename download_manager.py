@@ -22,7 +22,6 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Optional
 
 import whisper
 
@@ -30,18 +29,18 @@ __all__ = [
     "WHISPER_CACHE_DIR",
     "WHISPER_MODELS",
     "WHISPER_MODEL_SIZES",
-    "DownloadCancelled",
     "ChecksumError",
+    "DownloadCancelled",
     "IncompleteDownload",
+    "cached_model_is_valid",
+    "describe_download_error",
+    "download_whisper_model",
+    "format_bytes",
+    "get_downloaded_whisper_models",
     "get_model_url",
     "model_file_path",
-    "format_bytes",
-    "sha256_of_file",
-    "download_whisper_model",
-    "describe_download_error",
-    "get_downloaded_whisper_models",
-    "cached_model_is_valid",
     "remove_model_file",
+    "sha256_of_file",
 ]
 
 logger = logging.getLogger(__name__)
@@ -117,7 +116,7 @@ class IncompleteDownload(OSError):
     """Соединение закрылось раньше времени, файл недополучен."""
 
 
-def get_model_url(model_name: str) -> Optional[str]:
+def get_model_url(model_name: str) -> str | None:
     """
     Возвращает прямой URL файла модели на серверах OpenAI.
 
@@ -131,7 +130,7 @@ def get_model_url(model_name: str) -> Optional[str]:
     return _FALLBACK_MODEL_URLS.get(model_name)
 
 
-def expected_sha256(model_name: str) -> Optional[str]:
+def expected_sha256(model_name: str) -> str | None:
     """Возвращает ожидаемую SHA-256 модели, зашитую в её URL."""
     url = get_model_url(model_name)
     if not url:
@@ -141,9 +140,7 @@ def expected_sha256(model_name: str) -> Optional[str]:
     return digest if digest and len(digest) == 64 else None
 
 
-def model_file_path(
-    model_name: str, cache_dir: Optional[Path] = None
-) -> Optional[Path]:
+def model_file_path(model_name: str, cache_dir: Path | None = None) -> Path | None:
     """
     Возвращает путь к файлу весов модели в кэше.
 
@@ -173,7 +170,7 @@ def format_bytes(num_bytes: float) -> str:
 def sha256_of_file(
     path: Path,
     chunk_size: int = _HASH_CHUNK_SIZE,
-    is_cancelled: Optional[CancelCallback] = None,
+    is_cancelled: CancelCallback | None = None,
 ) -> str:
     """
     Считает SHA-256 файла блоками, не загружая его целиком в память.
@@ -195,9 +192,9 @@ def sha256_of_file(
 
 def cached_model_is_valid(
     model_name: str,
-    cache_dir: Optional[Path] = None,
-    is_cancelled: Optional[CancelCallback] = None,
-) -> Optional[bool]:
+    cache_dir: Path | None = None,
+    is_cancelled: CancelCallback | None = None,
+) -> bool | None:
     """
     Проверяет целостность уже лежащего в кэше файла модели.
 
@@ -218,9 +215,7 @@ def cached_model_is_valid(
     return actual == digest
 
 
-def remove_model_file(
-    model_name: str, cache_dir: Optional[Path] = None
-) -> list[str]:
+def remove_model_file(model_name: str, cache_dir: Path | None = None) -> list[str]:
     """
     Удаляет веса модели и недокачанный ``.part`` из кэша.
 
@@ -244,9 +239,9 @@ def remove_model_file(
 def download_whisper_model(
     url: str,
     dest_dir: Path,
-    on_progress: Optional[ProgressCallback] = None,
-    on_status: Optional[StatusCallback] = None,
-    is_cancelled: Optional[CancelCallback] = None,
+    on_progress: ProgressCallback | None = None,
+    on_status: StatusCallback | None = None,
+    is_cancelled: CancelCallback | None = None,
     chunk_size: int = _CHUNK_SIZE,
     progress_interval: float = PROGRESS_INTERVAL,
     allow_resume: bool = True,
@@ -345,11 +340,7 @@ def download_whisper_model(
 
             if resume_from:
                 content_range = response.headers.get("Content-Range") or ""
-                total = (
-                    int(content_range.rsplit("/", 1)[-1])
-                    if "/" in content_range
-                    else 0
-                )
+                total = int(content_range.rsplit("/", 1)[-1]) if "/" in content_range else 0
             else:
                 total = int(response.headers.get("Content-Length") or 0)
 
@@ -379,9 +370,7 @@ def download_whisper_model(
             check_cancel()
             actual = sha256_of_file(part, is_cancelled=is_cancelled)
             if actual != digest:
-                raise ChecksumError(
-                    "контрольная сумма не совпала — файл повреждён при загрузке"
-                )
+                raise ChecksumError("контрольная сумма не совпала — файл повреждён при загрузке")
     except DownloadCancelled:
         part.unlink(missing_ok=True)
         raise
@@ -415,7 +404,7 @@ def describe_download_error(exc: BaseException) -> str:
 
 
 def get_downloaded_whisper_models(
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> set[str]:
     """
     Сканирует кэш и возвращает множество имён доступных моделей.
@@ -429,11 +418,19 @@ def get_downloaded_whisper_models(
     """
     cache_dir = Path(cache_dir or WHISPER_CACHE_DIR)
     official_models = (
-        "tiny", "tiny.en",
-        "base", "base.en",
-        "small", "small.en",
-        "medium", "medium.en",
-        "large", "large-v1", "large-v2", "large-v3", "turbo",
+        "tiny",
+        "tiny.en",
+        "base",
+        "base.en",
+        "small",
+        "small.en",
+        "medium",
+        "medium.en",
+        "large",
+        "large-v1",
+        "large-v2",
+        "large-v3",
+        "turbo",
     )
     downloaded: set[str] = set()
 

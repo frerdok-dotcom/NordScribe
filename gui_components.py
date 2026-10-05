@@ -11,11 +11,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import tkinter as tk
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import customtkinter as ctk
 
@@ -23,9 +24,9 @@ import download_manager as dm
 from model_labels import MENU_COLOR_DOWNLOADED, MENU_COLOR_MISSING
 
 __all__ = [
-    "pick_emoji_font_family",
-    "apply_menu_item_colors",
     "ModelManagerWindow",
+    "apply_menu_item_colors",
+    "pick_emoji_font_family",
 ]
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ _DELETE_CONFIRM_MS = 5000
 _dropdown_warned = False
 
 
-def pick_emoji_font_family() -> Optional[str]:
+def pick_emoji_font_family() -> str | None:
     """
     Подбирает семейство шрифта, которое умеет рисовать цветные эмодзи.
 
@@ -66,7 +67,7 @@ def pick_emoji_font_family() -> Optional[str]:
         import tkinter.font as tkfont
 
         available = set(tkfont.families())
-    except Exception:  # noqa: BLE001 — без окна Tk список недоступен
+    except Exception:
         return None
     for family in candidates:
         if family in available:
@@ -74,7 +75,7 @@ def pick_emoji_font_family() -> Optional[str]:
     return None
 
 
-def find_dropdown_menu(option_menu: Any) -> Optional[tk.Menu]:
+def find_dropdown_menu(option_menu: Any) -> tk.Menu | None:
     """
     Достаёт внутреннее меню из ``CTkOptionMenu``.
 
@@ -122,9 +123,7 @@ def apply_menu_item_colors(
         return
     available = set(downloaded)
     for index, model in enumerate(models):
-        color = (
-            MENU_COLOR_DOWNLOADED if model in available else MENU_COLOR_MISSING
-        )
+        color = MENU_COLOR_DOWNLOADED if model in available else MENU_COLOR_MISSING
         try:
             menu.entryconfigure(index, foreground=color)
         except tk.TclError:
@@ -155,7 +154,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         downloaded_models: Iterable[str],
         on_models_changed: Callable[[], set[str]],
         on_busy_changed: Callable[[bool], None],
-        on_closed: Optional[Callable[[], None]] = None,
+        on_closed: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
         self._downloaded: set[str] = set(downloaded_models)
@@ -164,10 +163,10 @@ class ModelManagerWindow(ctk.CTkToplevel):
         self._on_closed = on_closed
 
         self._alive = True
-        self._downloading: Optional[str] = None
+        self._downloading: str | None = None
         self._cancel_requested = False
-        self._pending_delete: Optional[str] = None
-        self._pending_delete_timer: Optional[str] = None
+        self._pending_delete: str | None = None
+        self._pending_delete_timer: str | None = None
         self._rows: dict[str, dict[str, Any]] = {}
 
         self.title("Диспетчер моделей Whisper")
@@ -255,9 +254,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         )
         size_label.grid(row=0, column=1, sticky="w", padx=(0, 10))
 
-        status = ctk.CTkLabel(
-            row, text="", width=130, anchor="e", font=ctk.CTkFont(size=12)
-        )
+        status = ctk.CTkLabel(row, text="", width=130, anchor="e", font=ctk.CTkFont(size=12))
         status.grid(row=0, column=2, sticky="e", padx=(0, 10))
 
         button = ctk.CTkButton(
@@ -331,7 +328,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         try:
             x = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
             y = parent.winfo_rooty() + (parent.winfo_height() - height) // 3
-        except Exception:  # noqa: BLE001 — родитель может быть уже уничтожен
+        except Exception:
             return
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
@@ -346,10 +343,8 @@ class ModelManagerWindow(ctk.CTkToplevel):
         """Планирует обновление виджетов в главном потоке Tkinter."""
         if not self._alive:
             return
-        try:
+        with contextlib.suppress(tk.TclError):  # окно уже уничтожено
             self.after(0, callback)
-        except tk.TclError:
-            pass  # окно уже уничтожено
 
     def _set_message(self, text: str, color: str = "gray") -> None:
         """Показывает строку состояния под списком моделей."""
@@ -379,17 +374,13 @@ class ModelManagerWindow(ctk.CTkToplevel):
             f"Нажмите «Точно удалить?» ещё раз, чтобы удалить веса '{name}'",
             COLOR_RED,
         )
-        self._pending_delete_timer = self.after(
-            _DELETE_CONFIRM_MS, self._cancel_pending_delete
-        )
+        self._pending_delete_timer = self.after(_DELETE_CONFIRM_MS, self._cancel_pending_delete)
 
     def _cancel_pending_delete(self) -> None:
         """Снимает ожидание подтверждения удаления."""
         if self._pending_delete_timer is not None:
-            try:
+            with contextlib.suppress(tk.TclError):
                 self.after_cancel(self._pending_delete_timer)
-            except tk.TclError:
-                pass
             self._pending_delete_timer = None
         if self._pending_delete is not None:
             self._pending_delete = None
@@ -459,9 +450,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         self._refresh_all()
         self._on_busy_changed(True)
 
-        threading.Thread(
-            target=self._download_worker, args=(name, url), daemon=True
-        ).start()
+        threading.Thread(target=self._download_worker, args=(name, url), daemon=True).start()
 
     def _download_worker(self, name: str, url: str) -> None:
         """Сеть и диск в отдельном потоке; виджеты не трогаются."""
@@ -472,14 +461,12 @@ class ModelManagerWindow(ctk.CTkToplevel):
                 on_progress=lambda done, total: self._ui(
                     lambda: self._show_progress(name, done, total)
                 ),
-                on_status=lambda text: self._ui(
-                    lambda: self._set_message(text, COLOR_ACCENT)
-                ),
+                on_status=lambda text: self._ui(lambda: self._set_message(text, COLOR_ACCENT)),
                 is_cancelled=lambda: self._cancel_requested,
             )
         except dm.DownloadCancelled:
             self._ui(lambda: self._after_cancel(name))
-        except Exception as exc:  # noqa: BLE001 — любой сбой сети или диска
+        except Exception as exc:
             # Имя exc удаляется по выходе из блока except, а лямбда выполнится
             # позже в главном потоке, поэтому фиксируем его как аргумент.
             self._ui(lambda error=exc: self._after_error(name, error))
@@ -500,9 +487,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
             )
         else:
             self.progress_bar.set(0)
-            self._set_message(
-                f"Скачивание '{name}': {dm.format_bytes(done)}", COLOR_ACCENT
-            )
+            self._set_message(f"Скачивание '{name}': {dm.format_bytes(done)}", COLOR_ACCENT)
 
     def _after_success(self, name: str) -> None:
         """Скачивание завершено: обновляем и диспетчер, и главное окно."""
@@ -514,9 +499,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
             return
         self._refresh_all()
         self.progress_bar.set(1.0)
-        self._set_message(
-            f"✓ Модель '{name}' скачана и доступна для транскрибации", "green"
-        )
+        self._set_message(f"✓ Модель '{name}' скачана и доступна для транскрибации", "green")
         self._on_busy_changed(False)
 
     def _after_error(self, name: str, exc: BaseException) -> None:

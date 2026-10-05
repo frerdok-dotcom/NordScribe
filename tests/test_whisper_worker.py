@@ -53,9 +53,7 @@ class TrimSilenceBoundsTest(unittest.TestCase):
         self.assertGreater(end / SR, 2.0)
 
     def test_all_silence_gives_empty_range(self) -> None:
-        self.assertEqual(
-            ww.trim_silence_bounds(silence(2.0), sample_rate=SR), (0, 0)
-        )
+        self.assertEqual(ww.trim_silence_bounds(silence(2.0), sample_rate=SR), (0, 0))
 
     def test_all_sound_is_kept_whole(self) -> None:
         data = tone(1.0)
@@ -111,8 +109,10 @@ class RecorderCase(unittest.TestCase):
 
     def make(self, **kwargs: object) -> ww.AudioRecorder:
         return ww.AudioRecorder(
-            sample_rate=SR, on_tick=self.ticks.append,
-            stream_factory=self.factory, **kwargs,  # type: ignore[arg-type]
+            sample_rate=SR,
+            on_tick=self.ticks.append,
+            stream_factory=self.factory,
+            **kwargs,  # type: ignore[arg-type]
         )
 
     @property
@@ -144,11 +144,11 @@ class AudioRecorderTest(RecorderCase):
         recorder = self.make(trim_silence=True, silence_threshold_db=-45.0)
         recorder.start()
         for _ in range(10):
-            self.stream.feed(silence(0.1))       # 1.0 с тишины в начале
+            self.stream.feed(silence(0.1))  # 1.0 с тишины в начале
         for _ in range(10):
-            self.stream.feed(tone(0.1))          # 1.0 с речи
+            self.stream.feed(tone(0.1))  # 1.0 с речи
         for _ in range(20):
-            self.stream.feed(silence(0.1))       # 2.0 с тишины в конце
+            self.stream.feed(silence(0.1))  # 2.0 с тишины в конце
         path = recorder.stop()
         written = frames_in(path)
         self.assertGreater(recorder.frames_written, 0)
@@ -235,14 +235,13 @@ class WhisperWorkerTest(unittest.TestCase):
         self._cache_patch.start()
         self.loads: list[str] = []
         self._load_patch = mock.patch.object(
-            ww.whisper, "load_model",
+            ww.whisper,
+            "load_model",
             side_effect=lambda name: (self.loads.append(name), FakeModel(name))[1],
         )
         self._load_patch.start()
         self.selected = {"name": "base"}
-        self.worker = ww.WhisperWorker(
-            model_name_provider=lambda: self.selected["name"]
-        )
+        self.worker = ww.WhisperWorker(model_name_provider=lambda: self.selected["name"])
 
     def tearDown(self) -> None:
         self.worker.shutdown(wait=True)
@@ -281,7 +280,9 @@ class WhisperWorkerTest(unittest.TestCase):
         statuses: list[str] = []
         results: list[str] = []
         self.worker.submit(
-            Path("a.wav"), lambda t, p: results.append(t), lambda e: None,
+            Path("a.wav"),
+            lambda t, p: results.append(t),
+            lambda e: None,
             statuses.append,
         ).result(timeout=10)
         self.assertTrue(any("Загрузка модели" in s for s in statuses))
@@ -303,26 +304,18 @@ class WhisperWorkerTest(unittest.TestCase):
 
         digest = hashlib.sha256(payload).hexdigest()
         with mock.patch.object(dm, "expected_sha256", return_value=digest):
-            self.worker.submit(Path("a.wav"), lambda t, p: None, lambda e: None).result(
-                timeout=10
-            )
+            self.worker.submit(Path("a.wav"), lambda t, p: None, lambda e: None).result(timeout=10)
         self.assertTrue((self.cache / "base.pt").exists())
 
     def test_verification_can_be_disabled(self) -> None:
         (self.cache / "base.pt").write_bytes(b"anything")
-        worker = ww.WhisperWorker(
-            model_name_provider=lambda: "base", verify_cache=False
-        )
-        worker.submit(Path("a.wav"), lambda t, p: None, lambda e: None).result(
-            timeout=10
-        )
+        worker = ww.WhisperWorker(model_name_provider=lambda: "base", verify_cache=False)
+        worker.submit(Path("a.wav"), lambda t, p: None, lambda e: None).result(timeout=10)
         self.assertTrue((self.cache / "base.pt").exists())
         worker.shutdown(wait=True)
 
     def test_load_failure_is_reported(self) -> None:
-        with mock.patch.object(
-            ww.whisper, "load_model", side_effect=RuntimeError("нет весов")
-        ):
+        with mock.patch.object(ww.whisper, "load_model", side_effect=RuntimeError("нет весов")):
             results: list[str] = []
             errors: list[BaseException] = []
             self.worker.submit(
@@ -340,9 +333,7 @@ class WhisperWorkerTest(unittest.TestCase):
 
         with mock.patch.object(ww.whisper, "load_model", return_value=Broken("x")):
             errors: list[BaseException] = []
-            self.worker.submit(
-                Path("a.wav"), lambda t, p: None, errors.append
-            ).result(timeout=10)
+            self.worker.submit(Path("a.wav"), lambda t, p: None, errors.append).result(timeout=10)
         self.assertIsInstance(errors[0], ww.TranscriptionError)
         self.assertIn("битый файл", str(errors[0]))
 
@@ -366,8 +357,7 @@ class WhisperWorkerTest(unittest.TestCase):
         # Ни одна задача не началась, пока не закончилась предыдущая.
         self.assertEqual(
             order,
-            ["start:0.wav", "end:0.wav", "start:1.wav", "end:1.wav",
-             "start:2.wav", "end:2.wav"],
+            ["start:0.wav", "end:0.wav", "start:1.wav", "end:1.wav", "start:2.wav", "end:2.wav"],
         )
 
 

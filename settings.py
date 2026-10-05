@@ -15,9 +15,9 @@ import logging.handlers
 import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-__all__ = ["APP_DIR", "SETTINGS_PATH", "LOG_PATH", "Settings", "setup_logging"]
+__all__ = ["APP_DIR", "LOG_PATH", "SETTINGS_PATH", "Settings", "setup_logging"]
 
 #: Каталог приложения в домашней папке пользователя.
 APP_DIR: Path = Path.home() / ".nordscribe"
@@ -44,7 +44,7 @@ class Settings:
     trim_silence: bool = True
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Settings":
+    def load(cls, path: Path | None = None) -> Settings:
         """
         Читает настройки с диска.
 
@@ -64,7 +64,7 @@ class Settings:
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in raw.items() if k in known})
 
-    def save(self, path: Optional[Path] = None) -> bool:
+    def save(self, path: Path | None = None) -> bool:
         """
         Записывает настройки на диск.
 
@@ -92,10 +92,10 @@ class Settings:
 
 
 def setup_logging(
-    path: Optional[Path] = None,
+    path: Path | None = None,
     level: int = logging.INFO,
     console: bool = True,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Настраивает журнал в файл с ротацией.
 
@@ -124,7 +124,9 @@ def setup_logging(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
-            path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUPS,
+            path,
+            maxBytes=_LOG_MAX_BYTES,
+            backupCount=_LOG_BACKUPS,
             encoding="utf-8",
         )
     except OSError as exc:
@@ -135,7 +137,5 @@ def setup_logging(
 
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
-    logging.getLogger(__name__).info(
-        "журнал открыт: %s (pid %d)", path, os.getpid()
-    )
+    logging.getLogger(__name__).info("журнал открыт: %s (pid %d)", path, os.getpid())
     return path

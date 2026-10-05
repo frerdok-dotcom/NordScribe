@@ -25,10 +25,10 @@ BAD_DIGEST = "0" * 64
 class _Handler(http.server.BaseHTTPRequestHandler):
     """Отдаёт PAYLOAD с разным поведением в зависимости от первого сегмента."""
 
-    def log_message(self, *args: object) -> None:  # noqa: D102 — тишина в тестах
+    def log_message(self, *args: object) -> None:
         pass
 
-    def do_GET(self) -> None:  # noqa: N802 — имя задано базовым классом
+    def do_GET(self) -> None:
         segment = self.path.strip("/").split("/")[0]
 
         if segment == "missing":
@@ -48,7 +48,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             for offset in range(0, len(PAYLOAD), 2048):
                 try:
-                    self.wfile.write(PAYLOAD[offset:offset + 2048])
+                    self.wfile.write(PAYLOAD[offset : offset + 2048])
                 except OSError:
                     return
                 time.sleep(0.02)
@@ -72,9 +72,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         body = PAYLOAD[start:]
         if start:
             self.send_response(206)
-            self.send_header(
-                "Content-Range", f"bytes {start}-{len(PAYLOAD) - 1}/{len(PAYLOAD)}"
-            )
+            self.send_header("Content-Range", f"bytes {start}-{len(PAYLOAD) - 1}/{len(PAYLOAD)}")
         else:
             self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -86,7 +84,7 @@ _server: http.server.ThreadingHTTPServer
 _base = ""
 
 
-def setUpModule() -> None:  # noqa: N802 — имя задано unittest
+def setUpModule() -> None:
     """Поднимает локальный сервер на время всего модуля."""
     global _server, _base
     _server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -94,7 +92,7 @@ def setUpModule() -> None:  # noqa: N802 — имя задано unittest
     threading.Thread(target=_server.serve_forever, daemon=True).start()
 
 
-def tearDownModule() -> None:  # noqa: N802
+def tearDownModule() -> None:
     _server.shutdown()
     _server.server_close()
 
@@ -147,8 +145,11 @@ class FormatBytesTest(unittest.TestCase):
 
     def test_scales(self) -> None:
         cases = {
-            0: "0 Б", 999: "999 Б", 2048: "2 КБ",
-            461234567: "440 МБ", 3_100_000_000: "2.9 ГБ",
+            0: "0 Б",
+            999: "999 Б",
+            2048: "2 КБ",
+            461234567: "440 МБ",
+            3_100_000_000: "2.9 ГБ",
         }
         for value, expected in cases.items():
             with self.subTest(value=value):
@@ -176,7 +177,8 @@ class DownloadSuccessTest(BaseCase):
     def test_downloads_and_verifies(self) -> None:
         progress: list[tuple[int, int]] = []
         result = dm.download_whisper_model(
-            url_for("plain", "model.pt"), self.dest,
+            url_for("plain", "model.pt"),
+            self.dest,
             on_progress=lambda d, t: progress.append((d, t)),
         )
         self.assertEqual(result.read_bytes(), PAYLOAD)
@@ -186,15 +188,19 @@ class DownloadSuccessTest(BaseCase):
     def test_progress_is_throttled(self) -> None:
         many: list[tuple[int, int]] = []
         dm.download_whisper_model(
-            url_for("plain", "a.pt"), self.dest,
+            url_for("plain", "a.pt"),
+            self.dest,
             on_progress=lambda d, t: many.append((d, t)),
-            chunk_size=2048, progress_interval=0.0,
+            chunk_size=2048,
+            progress_interval=0.0,
         )
         few: list[tuple[int, int]] = []
         dm.download_whisper_model(
-            url_for("plain", "b.pt"), self.dest,
+            url_for("plain", "b.pt"),
+            self.dest,
             on_progress=lambda d, t: few.append((d, t)),
-            chunk_size=2048, progress_interval=60.0,
+            chunk_size=2048,
+            progress_interval=60.0,
         )
         self.assertGreater(len(many), 20)
         self.assertLessEqual(len(few), 3)
@@ -214,7 +220,8 @@ class DownloadResumeTest(BaseCase):
         self._seed_part("model.pt", offset)
         progress: list[tuple[int, int]] = []
         result = dm.download_whisper_model(
-            url_for("plain", "model.pt"), self.dest,
+            url_for("plain", "model.pt"),
+            self.dest,
             on_progress=lambda d, t: progress.append((d, t)),
         )
         self.assertEqual(result.read_bytes(), PAYLOAD)
@@ -225,9 +232,7 @@ class DownloadResumeTest(BaseCase):
 
     def test_restarts_when_server_ignores_range(self) -> None:
         self._seed_part("model.pt", len(PAYLOAD) // 2)
-        result = dm.download_whisper_model(
-            url_for("norange", "model.pt"), self.dest
-        )
+        result = dm.download_whisper_model(url_for("norange", "model.pt"), self.dest)
         self.assertEqual(result.read_bytes(), PAYLOAD)
         self.assert_no_parts()
 
@@ -235,7 +240,8 @@ class DownloadResumeTest(BaseCase):
         self._seed_part("model.pt", len(PAYLOAD) // 2)
         progress: list[tuple[int, int]] = []
         dm.download_whisper_model(
-            url_for("plain", "model.pt"), self.dest,
+            url_for("plain", "model.pt"),
+            self.dest,
             on_progress=lambda d, t: progress.append((d, t)),
             allow_resume=False,
         )
@@ -255,9 +261,7 @@ class DownloadErrorTest(BaseCase):
 
     def test_checksum_error_removes_part(self) -> None:
         with self.assertRaises(dm.ChecksumError):
-            dm.download_whisper_model(
-                url_for("plain", "bad.pt", digest=BAD_DIGEST), self.dest
-            )
+            dm.download_whisper_model(url_for("plain", "bad.pt", digest=BAD_DIGEST), self.dest)
         self.assertFalse((self.dest / "bad.pt").exists())
         self.assert_no_parts()
 
@@ -284,7 +288,8 @@ class DownloadErrorTest(BaseCase):
         calls["cancel"] = False
         with self.assertRaises(dm.DownloadCancelled):
             dm.download_whisper_model(
-                url_for("slow", "slow.pt"), self.dest,
+                url_for("slow", "slow.pt"),
+                self.dest,
                 on_progress=on_progress,
                 is_cancelled=lambda: calls["cancel"],
                 progress_interval=0.0,
@@ -324,14 +329,18 @@ class CacheTest(BaseCase):
 
     def test_matching_hash_is_true(self) -> None:
         (self.dest / "tiny.pt").write_bytes(PAYLOAD)
-        with mock.patch.object(dm, "WHISPER_CACHE_DIR", self.dest), \
-                mock.patch.object(dm, "expected_sha256", return_value=DIGEST):
+        with (
+            mock.patch.object(dm, "WHISPER_CACHE_DIR", self.dest),
+            mock.patch.object(dm, "expected_sha256", return_value=DIGEST),
+        ):
             self.assertTrue(dm.cached_model_is_valid("tiny"))
 
     def test_mismatched_hash_is_false(self) -> None:
         (self.dest / "tiny.pt").write_bytes(b"truncated-weights")
-        with mock.patch.object(dm, "WHISPER_CACHE_DIR", self.dest), \
-                mock.patch.object(dm, "expected_sha256", return_value=DIGEST):
+        with (
+            mock.patch.object(dm, "WHISPER_CACHE_DIR", self.dest),
+            mock.patch.object(dm, "expected_sha256", return_value=DIGEST),
+        ):
             self.assertFalse(dm.cached_model_is_valid("tiny"))
 
     def test_remove_deletes_model_and_part(self) -> None:
@@ -362,9 +371,7 @@ class ScannedModelsTest(BaseCase):
         self.assertEqual(dm.get_downloaded_whisper_models(self.dest), set())
 
     def test_missing_directory_is_empty(self) -> None:
-        self.assertEqual(
-            dm.get_downloaded_whisper_models(self.dest / "нет-такого"), set()
-        )
+        self.assertEqual(dm.get_downloaded_whisper_models(self.dest / "нет-такого"), set())
 
 
 if __name__ == "__main__":

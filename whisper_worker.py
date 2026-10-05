@@ -27,7 +27,7 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import sounddevice as sd
@@ -36,9 +36,9 @@ import whisper
 import download_manager as dm
 
 __all__ = [
+    "AudioRecorder",
     "RecorderError",
     "TranscriptionError",
-    "AudioRecorder",
     "WhisperWorker",
     "cleanup_temp_file",
     "trim_silence_bounds",
@@ -69,7 +69,7 @@ class TranscriptionError(Exception):
     """Whisper не смог обработать аудиофайл."""
 
 
-def cleanup_temp_file(path: Optional[Path]) -> bool:
+def cleanup_temp_file(path: Path | None) -> bool:
     """
     Удаляет временный файл, созданный рекордером.
 
@@ -164,8 +164,8 @@ class AudioRecorder:
     def __init__(
         self,
         sample_rate: int = 16000,
-        on_tick: Optional[TickCallback] = None,
-        stream_factory: Optional[Callable[..., Any]] = None,
+        on_tick: TickCallback | None = None,
+        stream_factory: Callable[..., Any] | None = None,
         trim_silence: bool = True,
         silence_threshold_db: float = -45.0,
         silence_margin_seconds: float = 0.3,
@@ -180,12 +180,12 @@ class AudioRecorder:
 
         self._queue: queue.Queue[tuple[bytes, int]] = queue.Queue()
         self._stream: Any = None
-        self._writer: Optional[threading.Thread] = None
-        self._wave: Optional[wave.Wave_write] = None
-        self._temp_path: Optional[Path] = None
+        self._writer: threading.Thread | None = None
+        self._wave: wave.Wave_write | None = None
+        self._temp_path: Path | None = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
-        self._write_error: Optional[BaseException] = None
+        self._write_error: BaseException | None = None
 
         self._pending: deque[tuple[bytes, int]] = deque()
         self._pending_frames = 0
@@ -262,15 +262,18 @@ class AudioRecorder:
     def _open_sink(self) -> None:
         """Создаёт временный WAV и открывает его на запись."""
         handle, name = tempfile.mkstemp(suffix=".wav", prefix="nordscribe_")
+        os.close(handle)
+        self._temp_path = Path(name)
         try:
-            os.close(handle)
-            self._temp_path = Path(name)
-            self._wave = wave.open(str(self._temp_path), "wb")
+            # Файл живёт между вызовами: закрывает его _close_sink,
+            # поэтому контекстный менеджер здесь неприменим.
+            self._wave = wave.open(str(self._temp_path), "wb")  # noqa: SIM115
             self._wave.setnchannels(1)
             self._wave.setsampwidth(2)  # int16
             self._wave.setframerate(self.sample_rate)
         except Exception as exc:
-            cleanup_temp_file(Path(name))
+            self._wave = None
+            cleanup_temp_file(self._temp_path)
             raise RecorderError(f"не удалось создать файл записи: {exc}") from exc
 
     def _close_sink(self) -> None:
@@ -278,7 +281,7 @@ class AudioRecorder:
         if self._wave is not None:
             try:
                 self._wave.close()
-            except Exception as exc:  # noqa: BLE001 — закрытие не должно падать
+            except Exception as exc:
                 logger.warning("ошибка закрытия WAV: %s", exc)
             self._wave = None
 
@@ -303,7 +306,7 @@ class AudioRecorder:
             mono = indata[:, 0] if indata.ndim > 1 else indata
             peak = int(np.abs(mono).max()) if mono.size else 0
             payload = mono.astype(np.int16, copy=True).tobytes()
-        except Exception:  # noqa: BLE001 — не роняем аудиопоток из-за одного блока
+        except Exception:
             logger.exception("не удалось обработать блок аудио, блок пропущен")
             return
         self._queue.put((payload, peak))
@@ -327,7 +330,7 @@ class AudioRecorder:
 
             try:
                 self._write_block(block, peak)
-            except Exception as exc:  # noqa: BLE001 — диск может отказать
+            except Exception as exc:
                 self._write_error = exc
                 logger.exception("ошибка записи аудио на диск")
                 break
@@ -353,7 +356,7 @@ class AudioRecorder:
         self._last_reported_second = second
         try:
             self._on_tick(self.duration)
-        except Exception:  # noqa: BLE001 — запись важнее статуса
+        except Exception:
             logger.exception("сбой в обработчике on_tick, запись продолжается")
 
     def _write_block(self, block: bytes, peak: int) -> None:
@@ -385,7 +388,7 @@ class AudioRecorder:
             _, dropped = self._pending.popleft()
             self._pending_frames -= dropped
 
-    def _dump_pending(self, limit: Optional[int] = None) -> None:
+    def _dump_pending(self, limit: int | None = None) -> None:
         """Записывает накопленные блоки тишины, не более ``limit`` кадров."""
         wave_out = self._wave
         if wave_out is None:
@@ -410,7 +413,7 @@ class AudioRecorder:
         self._pending.clear()
         self._pending_frames = 0
 
-    def stop(self) -> Optional[Path]:
+    def stop(self) -> Path | None:
         """
         Останавливает запись и возвращает путь к готовому WAV.
 
@@ -429,7 +432,7 @@ class AudioRecorder:
             try:
                 stream.stop()
                 stream.close()
-            except Exception as exc:  # noqa: BLE001 — закрытие не критично
+            except Exception as exc:
                 logger.debug("ошибка закрытия входного потока: %s", exc)
 
         if self._writer is not None:
@@ -485,18 +488,16 @@ class WhisperWorker:
         self._language = language
         self._verify_cache = verify_cache
         self._model: Any = None
-        self._loaded_name: Optional[str] = None
+        self._loaded_name: str | None = None
         self._model_lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="whisper"
-        )
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
 
     @property
-    def loaded_model_name(self) -> Optional[str]:
+    def loaded_model_name(self) -> str | None:
         """Имя загруженной модели или ``None``, если модель ещё не загружена."""
         return self._loaded_name
 
-    def ensure_model(self, on_status: Optional[StatusCallback] = None) -> str:
+    def ensure_model(self, on_status: StatusCallback | None = None) -> str:
         """
         Загружает модель, если она не загружена или выбор в UI изменился.
 
@@ -517,15 +518,11 @@ class WhisperWorker:
             try:
                 self._model = whisper.load_model(name)
             except Exception as exc:
-                raise TranscriptionError(
-                    f"не удалось загрузить модель '{name}': {exc}"
-                ) from exc
+                raise TranscriptionError(f"не удалось загрузить модель '{name}': {exc}") from exc
             self._loaded_name = name
             return name
 
-    def _repair_cache(
-        self, name: str, on_status: Optional[StatusCallback] = None
-    ) -> None:
+    def _repair_cache(self, name: str, on_status: StatusCallback | None = None) -> None:
         """Удаляет повреждённый файл модели, чтобы библиотека скачала его заново."""
         try:
             valid = dm.cached_model_is_valid(name)
@@ -543,7 +540,7 @@ class WhisperWorker:
     def transcribe(
         self,
         audio_path: Path,
-        on_status: Optional[StatusCallback] = None,
+        on_status: StatusCallback | None = None,
     ) -> str:
         """
         Распознаёт речь в файле. Блокирующая операция для рабочего потока.
@@ -572,7 +569,7 @@ class WhisperWorker:
         audio_path: Path,
         on_done: DoneCallback,
         on_error: ErrorCallback,
-        on_status: Optional[StatusCallback] = None,
+        on_status: StatusCallback | None = None,
     ) -> Future:
         """
         Ставит транскрибацию в очередь рабочего потока.
@@ -587,7 +584,7 @@ class WhisperWorker:
         def job() -> None:
             try:
                 text = self.transcribe(audio_path, on_status)
-            except BaseException as exc:  # noqa: BLE001 — сообщаем о любой ошибке
+            except BaseException as exc:
                 on_error(exc)
             else:
                 on_done(text, Path(audio_path))

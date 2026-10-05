@@ -9,22 +9,21 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Optional
 
 __all__ = [
+    "DISPLAY_MARKERS",
     "MARKER_DOWNLOADED",
     "MARKER_MISSING",
-    "DISPLAY_MARKERS",
     "MENU_COLOR_DOWNLOADED",
     "MENU_COLOR_MISSING",
-    "clean_model_label",
     "build_model_labels",
+    "clean_model_label",
     "label_for_model",
 ]
 
 #: Цветные маркеры статуса в выпадающем списке.
-MARKER_DOWNLOADED = "🟢"   # веса уже лежат в ~/.cache/whisper
-MARKER_MISSING = "🔵"      # требуется загрузка (альтернатива — "🟡")
+MARKER_DOWNLOADED = "🟢"  # веса уже лежат в ~/.cache/whisper
+MARKER_MISSING = "🔵"  # требуется загрузка (альтернатива — "🟡")
 
 #: Любые маркеры, которые снимаются перед передачей имени в Whisper.
 #: ⚪ и 🟡 оставлены для совместимости со старыми подписями.
@@ -36,7 +35,7 @@ MENU_COLOR_DOWNLOADED = "#4CAF50"
 MENU_COLOR_MISSING = "#3B8ED0"
 
 
-def clean_model_label(display_name: Optional[str]) -> str:
+def clean_model_label(display_name: str | None) -> str:
     """
     Снимает цветной маркер и возвращает чистое имя модели для Whisper.
 
@@ -50,16 +49,14 @@ def clean_model_label(display_name: Optional[str]) -> str:
     name = (display_name or "").strip()
     for marker in DISPLAY_MARKERS:
         if name.startswith(marker):
-            name = name[len(marker):].strip()
+            name = name[len(marker) :].strip()
             break
     # Берём только первое слово: отсекает любые пояснения после имени.
     parts = name.split()
     return parts[0] if parts else ""
 
 
-def build_model_labels(
-    models: Iterable[str], downloaded: Iterable[str]
-) -> list[str]:
+def build_model_labels(models: Iterable[str], downloaded: Iterable[str]) -> list[str]:
     """
     Строит подписи для выпадающего списка с маркерами статуса.
 

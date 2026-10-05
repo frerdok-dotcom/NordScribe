@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import unittest
 
@@ -18,7 +19,7 @@ class CheckResultTest(unittest.TestCase):
 
     def test_is_immutable(self) -> None:
         result = preflight.CheckResult("тест", True, "ок")
-        with self.assertRaises(Exception):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             result.ok = False  # type: ignore[misc]
 
 

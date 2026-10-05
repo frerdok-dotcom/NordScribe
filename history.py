@@ -21,7 +21,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import settings as app_settings
 
@@ -95,7 +94,7 @@ class TranscriptionHistory:
             :data:`DEFAULT_DB_PATH`.
     """
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         self._path = Path(db_path or DEFAULT_DB_PATH)
 
     @property
@@ -138,7 +137,7 @@ class TranscriptionHistory:
         logger.info("история готова: %s", self._path)
         return True
 
-    def add(self, text: str) -> Optional[HistoryEntry]:
+    def add(self, text: str) -> HistoryEntry | None:
         """
         Записывает текст транскрибации.
 
@@ -192,9 +191,7 @@ class TranscriptionHistory:
         """Сколько записей хранится в базе."""
         try:
             with self._connect() as connection:
-                row = connection.execute(
-                    "SELECT COUNT(*) FROM transcription_history"
-                ).fetchone()
+                row = connection.execute("SELECT COUNT(*) FROM transcription_history").fetchone()
         except sqlite3.Error as exc:
             logger.warning("не удалось посчитать записи: %s", exc)
             return 0
