@@ -18,8 +18,7 @@ from pathlib import Path
 #: с тестами. Системный Temp не подходит — в изолированных средах он бывает
 #: закрыт для создания подкаталогов.
 TEST_TMP_BASE = Path(
-    os.environ.get("NORDSCRIBE_TEST_TMP")
-    or (Path(__file__).resolve().parent / "_tmp")
+    os.environ.get("NORDSCRIBE_TEST_TMP") or (Path(__file__).resolve().parent / "_tmp")
 )
 TEST_TMP_BASE.mkdir(parents=True, exist_ok=True)
 

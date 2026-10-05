@@ -39,9 +39,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(config.model, "base")
 
     def test_unknown_fields_are_ignored(self) -> None:
-        self.path.write_text(
-            json.dumps({"model": "small", "мусор": 1}), encoding="utf-8"
-        )
+        self.path.write_text(json.dumps({"model": "small", "мусор": 1}), encoding="utf-8")
         config = app_settings.Settings.load(self.path)
         self.assertEqual(config.model, "small")
 

@@ -30,9 +30,7 @@ class SchemaTest(HistoryCase):
         with sqlite3.connect(self.db) as connection:
             names = {
                 row[0]
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         self.assertIn("transcription_history", names)
 
@@ -44,9 +42,7 @@ class SchemaTest(HistoryCase):
     def test_schema_matches_specification(self) -> None:
         self.history.init_schema()
         with sqlite3.connect(self.db) as connection:
-            columns = connection.execute(
-                "PRAGMA table_info(transcription_history)"
-            ).fetchall()
+            columns = connection.execute("PRAGMA table_info(transcription_history)").fetchall()
         self.assertEqual([c[1] for c in columns], ["id", "text", "created_at"])
         self.assertEqual(columns[0][5], 1, "id должен быть первичным ключом")
         self.assertEqual(columns[1][3], 1, "text должен быть NOT NULL")
@@ -55,9 +51,7 @@ class SchemaTest(HistoryCase):
         self.history.init_schema()
         self.history.add("текст")
         with sqlite3.connect(self.db) as connection:
-            row = connection.execute(
-                "SELECT created_at FROM transcription_history"
-            ).fetchone()
+            row = connection.execute("SELECT created_at FROM transcription_history").fetchone()
         # Формат SQLite CURRENT_TIMESTAMP; заодно проверяем, что DEFAULT сработал.
         datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
 
@@ -66,9 +60,7 @@ class SchemaTest(HistoryCase):
         with sqlite3.connect(self.db) as connection:
             indexes = {
                 row[0]
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")
             }
         self.assertIn("idx_transcription_history_order", indexes)
 
@@ -130,9 +122,7 @@ class ReadTest(HistoryCase):
         self.history.init_schema()
         for text in ("первый", "второй", "третий"):
             self.history.add(text)
-        self.assertEqual(
-            [e.text for e in self.history.all()], ["третий", "второй", "первый"]
-        )
+        self.assertEqual([e.text for e in self.history.all()], ["третий", "второй", "первый"])
 
     def test_all_on_empty_base(self) -> None:
         self.history.init_schema()
@@ -158,9 +148,7 @@ class ReadTest(HistoryCase):
         with sqlite3.connect(self.db) as connection:
             stamps = {
                 row[0]
-                for row in connection.execute(
-                    "SELECT created_at FROM transcription_history"
-                )
+                for row in connection.execute("SELECT created_at FROM transcription_history")
             }
         self.assertEqual(len(stamps), 1, "тест имеет смысл только при равных метках")
         self.assertEqual(
@@ -268,5 +256,7 @@ class FormatLocalTimeTest(unittest.TestCase):
             self.assertEqual(shown, actual)
         finally:
             remove_temp_dir(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()
