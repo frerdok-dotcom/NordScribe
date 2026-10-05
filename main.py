@@ -8,6 +8,8 @@ NordScribe — локальная транскрибация аудио чере
 * запись звука и распознавание — :mod:`whisper_worker`;
 * чистые подписи моделей — :mod:`model_labels`;
 * окно диспетчера и покраска меню — :mod:`gui_components`;
+* вкладки интерфейса — :mod:`tab_transcription` и :mod:`tab_history`;
+* палитра и шрифты — :mod:`theme`;
 * настройки и журнал — :mod:`settings`;
 * проверки окружения — :mod:`preflight`.
 
@@ -18,12 +20,10 @@ NordScribe — локальная транскрибация аудио чере
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog as fd
 
 import customtkinter as ctk
 
@@ -34,6 +34,18 @@ import model_labels as labels
 import preflight
 import settings as app_settings
 import whisper_worker as ww
+from tab_history import HistoryTab
+from tab_transcription import IDLE_STATUS, TranscriptionTab
+from theme import (
+    COLOR_ACCENT,
+    COLOR_GREY,
+    COLOR_GREY_HOVER,
+    COLOR_RED,
+    STATUS_GRAY,
+    STATUS_GREEN,
+    STATUS_ORANGE,
+    ui_font,
+)
 
 __all__ = ["NordScribeApp", "main"]
 
@@ -41,9 +53,6 @@ logger = logging.getLogger(__name__)
 
 #: Допустимая строка геометрии окна вида 1100x700 или 1100x700+100+50.
 _GEOMETRY_RE = re.compile(r"^\d+x\d+([+-]\d+[+-]\d+)?$")
-
-#: Сколько ждать подтверждения очистки истории.
-_HISTORY_CLEAR_CONFIRM_MS = 5000
 
 
 class NordScribeApp(ctk.CTk):
@@ -109,10 +118,6 @@ class NordScribeApp(ctk.CTk):
         # (~/.nordscribe/history.db), а не индекс CodeGraph из .codegraph/.
         self.history = history.TranscriptionHistory()
         self._history_available = self.history.init_schema()
-        self._history_first: ctk.CTkFrame | None = None
-        self._history_placeholder: ctk.CTkFrame | None = None
-        self._history_clear_armed = False
-        self._history_clear_timer: str | None = None
 
         self._build_layout()
         gui.apply_menu_item_colors(
@@ -144,7 +149,7 @@ class NordScribeApp(ctk.CTk):
             return
         summary = preflight.summarize(results)
         if summary:
-            self.lbl_status.configure(text=summary, text_color="orange")
+            self.transcription.set_status(summary, STATUS_ORANGE)
         logger.info(
             "окружение: %s",
             "; ".join(f"{r.name}={'ok' if r.ok else 'нет'}" for r in results),
@@ -166,7 +171,7 @@ class NordScribeApp(ctk.CTk):
         Раньше окно закрывалось, оставив открытым поток PortAudio и болтающийся
         временный WAV: запись не останавливалась, а файл никто не удалял.
         """
-        self._cancel_history_clear()
+        self.history_tab.cancel_clear()
         if self.recorder.is_recording:
             try:
                 ww.cleanup_temp_file(self.recorder.stop())
@@ -213,9 +218,6 @@ class NordScribeApp(ctk.CTk):
             font=ctk.CTkFont(size=13, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=(0, 8))
 
-        def menu_font() -> ctk.CTkFont:
-            return self._ui_font(size=13)
-
         self.whisper_menu = ctk.CTkOptionMenu(
             self.settings_frame,
             variable=self.whisper_display_var,
@@ -223,8 +225,8 @@ class NordScribeApp(ctk.CTk):
             command=self._on_whisper_model_change,
             width=140,
             height=30,
-            font=menu_font(),
-            dropdown_font=menu_font(),
+            font=self._ui_font(size=13),
+            dropdown_font=self._ui_font(size=13),
         )
         self.whisper_menu.grid(row=0, column=1, sticky="w")
 
@@ -234,22 +236,14 @@ class NordScribeApp(ctk.CTk):
             command=self.open_model_manager,
             width=190,
             height=30,
-            fg_color=gui.COLOR_GREY,
-            hover_color=gui.COLOR_GREY_HOVER,
+            fg_color=COLOR_GREY,
+            hover_color=COLOR_GREY_HOVER,
         )
         self.btn_manage_models.grid(row=0, column=2, sticky="e")
 
     def _ui_font(self, size: int = 13, bold: bool = False) -> ctk.CTkFont:
-        """
-        Шрифт интерфейса.
-
-        Если в системе есть шрифт с цветными эмодзи, он подставляется — иначе
-        значки вроде 📋 рисуются пустым квадратом (проверено снимком экрана).
-        """
-        weight = "bold" if bold else "normal"
-        if self._emoji_family:
-            return ctk.CTkFont(family=self._emoji_family, size=size, weight=weight)
-        return ctk.CTkFont(size=size, weight=weight)
+        """Шрифт интерфейса (см. :func:`theme.ui_font`)."""
+        return ui_font(self._emoji_family, size=size, bold=bold)
 
     def _build_tabbed_area(self) -> None:
         """
@@ -257,243 +251,43 @@ class NordScribeApp(ctk.CTk):
 
         CTkTabview растягивает активную вкладку (внутри он ставит её с
         sticky="nsew" в строку с weight=1), поэтому поле транскрибации
-        занимает всю высоту, как и до появления истории.
+        занимает всю высоту, как и до появления истории. Виджеты самих
+        вкладок живут в :mod:`tab_transcription` и :mod:`tab_history`.
         """
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
-        self.tab_transcription = self.tabview.add("Транскрибация")
-        self.tab_history = self.tabview.add("История")
-        self._build_transcription_tab()
-        self._build_history_tab()
-
-    def _build_transcription_tab(self) -> None:
-        """Заголовок, поле вывода, кнопки управления и индикатор прогресса."""
-        tab = self.tab_transcription
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)  # растягивается поле вывода
-
-        self.lbl_transcript = ctk.CTkLabel(
-            tab,
-            text="🎙️ Транскрибация (Whisper)",
-            font=ctk.CTkFont(size=18, weight="bold"),
+        tabview = ctk.CTkTabview(self)
+        tabview.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        self.transcription = TranscriptionTab(
+            tabview.add("Транскрибация"),
+            emoji_family=self._emoji_family,
+            on_load_audio=self.start_transcription_thread,
+            on_toggle_recording=self.toggle_recording,
         )
-        self.lbl_transcript.grid(row=0, column=0, sticky="nw", pady=(4, 10))
-
-        self.txt_transcript = ctk.CTkTextbox(tab, wrap="word", font=ctk.CTkFont(size=14))
-        self.txt_transcript.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-
-        self.frame_controls = ctk.CTkFrame(tab, fg_color="transparent")
-        self.frame_controls.grid(row=2, column=0, sticky="ew")
-        self.frame_controls.grid_columnconfigure((0, 1), weight=1)
-
-        self.btn_load_audio = ctk.CTkButton(
-            self.frame_controls,
-            text="📁 Загрузить аудиофайл",
-            command=self.start_transcription_thread,
-            height=45,
-            font=ctk.CTkFont(size=14, weight="bold"),
+        self.history_tab = HistoryTab(
+            tabview.add("История"),
+            emoji_family=self._emoji_family,
+            on_cleared=self._clear_history,
         )
-        self.btn_load_audio.grid(row=0, column=0, padx=(0, 10), pady=(0, 10), sticky="ew")
-
-        self.btn_record_mic = ctk.CTkButton(
-            self.frame_controls,
-            text="🎤 Записать с микрофона",
-            command=self.toggle_recording,
-            fg_color=gui.COLOR_RED,
-            hover_color=gui.COLOR_RED_HOVER,
-            height=45,
-            font=ctk.CTkFont(size=14, weight="bold"),
-        )
-        self.btn_record_mic.grid(row=0, column=1, padx=(10, 0), pady=(0, 10), sticky="ew")
-
-        self.progress_bar = ctk.CTkProgressBar(self.frame_controls, height=10)
-        self.progress_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 10))
-        self.progress_bar.set(0)
-
-        self.lbl_status = ctk.CTkLabel(
-            self.frame_controls,
-            text="Готов к работе",
-            text_color="gray",
-            font=ctk.CTkFont(size=13),
-        )
-        self.lbl_status.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        if not self._history_available:
+            self.history_tab.set_enabled(False)
 
     # ------------------------------------------------------------------
     # история транскрибаций
     # ------------------------------------------------------------------
 
-    def _build_history_tab(self) -> None:
-        """Кнопка очистки и прокручиваемый список прошлых транскрибаций."""
-        tab = self.tab_history
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)  # растягивается список
-
-        header = ctk.CTkFrame(tab, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", pady=(4, 6))
-        header.grid_columnconfigure(0, weight=1)
-
-        self.btn_clear_history = ctk.CTkButton(
-            header,
-            text="Очистить историю 🗑",
-            width=190,
-            height=28,
-            font=self._ui_font(size=12),
-            fg_color=gui.COLOR_GREY,
-            hover_color=gui.COLOR_GREY_HOVER,
-            command=self._on_clear_history_click,
-        )
-        self.btn_clear_history.grid(row=0, column=1, sticky="e")
-        if not self._history_available:
-            self.btn_clear_history.configure(state="disabled")
-
-        self.history_scroll_frame = ctk.CTkScrollableFrame(tab)
-        self.history_scroll_frame.grid(row=1, column=0, sticky="nsew")
-
     def _load_history(self) -> None:
         """Заполняет вкладку истории записями из базы при старте приложения."""
         if not self._history_available:
-            if self.lbl_status.cget("text") == "Готов к работе":
-                self.lbl_status.configure(
-                    text="История недоступна: не удалось открыть базу данных",
-                    text_color="orange",
+            if self.transcription.lbl_status.cget("text") == IDLE_STATUS:
+                self.transcription.set_status(
+                    "История недоступна: не удалось открыть базу данных",
+                    STATUS_ORANGE,
                 )
-            self._show_history_placeholder("История недоступна")
+            self.history_tab.show_placeholder("История недоступна")
             return
 
         entries = self.history.all()
-        for entry in entries:
-            card = self._create_history_card(entry)
-            card.pack(fill="x", padx=8, pady=(6, 0))
-            if self._history_first is None:
-                self._history_first = card
-        if not entries:
-            self._show_history_placeholder("История пуста")
+        self.history_tab.load(entries)
         logger.info("история: загружено записей — %d", len(entries))
-
-    def _show_history_placeholder(self, text: str) -> None:
-        """Показывает заглушку, пока записей нет или база недоступна."""
-        placeholder = ctk.CTkFrame(self.history_scroll_frame, fg_color="transparent")
-        placeholder.pack(fill="x", padx=8, pady=20)
-        ctk.CTkLabel(
-            placeholder,
-            text=text,
-            text_color="gray",
-            font=ctk.CTkFont(size=13),
-        ).pack()
-        self._history_placeholder = placeholder
-        if self._history_first is None:
-            self._history_first = placeholder
-
-    def _hide_history_placeholder(self) -> None:
-        """Убирает заглушку, когда появляется первая настоящая запись."""
-        placeholder = self._history_placeholder
-        if placeholder is None:
-            return
-        if self._history_first is placeholder:
-            self._history_first = None
-        self._history_placeholder = None
-        with contextlib.suppress(tk.TclError):
-            placeholder.destroy()
-
-    def _create_history_card(self, entry: history.HistoryEntry) -> ctk.CTkFrame:
-        """
-        Создаёт карточку одной записи истории.
-
-        Карточка — дочерний элемент ``self.history_scroll_frame``, остальные
-        виджеты — дочерние элементы карточки.
-        """
-        card = ctk.CTkFrame(self.history_scroll_frame, corner_radius=6)
-        card.grid_columnconfigure(0, weight=1)
-
-        header = ctk.CTkFrame(card, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
-        header.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            header,
-            text=history.format_local_time(entry.created_at),
-            font=ctk.CTkFont(size=11),
-            text_color="gray",
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w")
-
-        timer: dict[str, str | None] = {"after_id": None}
-        button = ctk.CTkButton(
-            header,
-            text="Копировать 📋",
-            width=150,
-            height=26,
-            font=self._ui_font(size=12),
-            fg_color=gui.COLOR_GREY,
-            hover_color=gui.COLOR_GREY_HOVER,
-        )
-        button.configure(command=lambda: self._copy_history_text(entry.text, button, timer))
-        button.grid(row=0, column=1, sticky="e")
-
-        text_box = ctk.CTkTextbox(card, height=74, wrap="word", font=ctk.CTkFont(size=13))
-        # Вставляем до блокировки: в состоянии disabled вставка игнорируется.
-        # Затем поле блокируется — стереть текст нельзя, а выделять мышкой
-        # и копировать фрагменты можно.
-        text_box.insert("1.0", entry.text)
-        text_box.configure(state="disabled")
-        text_box.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 10))
-        return card
-
-    def _prepend_history_card(self, entry: history.HistoryEntry) -> None:
-        """Добавляет карточку в начало списка, без перезапуска приложения."""
-        # Появились новые данные — подтверждение очистки снимаем, иначе оно
-        # сработало бы уже над другим содержимым истории.
-        self._cancel_history_clear()
-        self._hide_history_placeholder()
-        card = self._create_history_card(entry)
-        first = self._history_first
-        if first is not None and first.winfo_exists():
-            card.pack(fill="x", padx=8, pady=(6, 0), before=first)
-        else:
-            card.pack(fill="x", padx=8, pady=(6, 0))
-        self._history_first = card
-
-    def _copy_history_text(
-        self, text: str, button: ctk.CTkButton, timer: dict[str, str | None]
-    ) -> None:
-        """
-        Копирует текст записи в системный буфер обмена и показывает отклик.
-
-        Кнопка на 1.5 секунды становится зелёной с надписью «Скопировано! ✅».
-        Повторный клик перезапускает таймер, а не наслаивает второй.
-        """
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(text)
-            self.update_idletasks()
-        except tk.TclError as exc:
-            logger.warning("буфер обмена недоступен: %s", exc)
-            return
-
-        previous = timer.get("after_id")
-        if previous:
-            with contextlib.suppress(tk.TclError):
-                button.after_cancel(previous)
-
-        button.configure(
-            text="Скопировано! ✅",
-            fg_color=gui.COLOR_GREEN,
-            hover_color=gui.COLOR_GREEN_HOVER,
-        )
-
-        def restore() -> None:
-            timer["after_id"] = None
-            try:
-                if button.winfo_exists():
-                    button.configure(
-                        text="Копировать 📋",
-                        fg_color=gui.COLOR_GREY,
-                        hover_color=gui.COLOR_GREY_HOVER,
-                    )
-            except tk.TclError:
-                pass  # карточку успели удалить
-
-        timer["after_id"] = button.after(1500, restore)
 
     def _save_to_history(self, text: str) -> None:
         """Пишет результат в SQLite и сразу показывает карточку в истории."""
@@ -505,67 +299,20 @@ class NordScribeApp(ctk.CTk):
         if entry is None:
             return
         self._history_available = True
-        self._prepend_history_card(entry)
+        self.history_tab.set_enabled(True)
+        self.history_tab.prepend(entry)
         logger.info("в историю добавлена запись id=%d", entry.id)
 
-    def _on_clear_history_click(self) -> None:
-        """
-        Первое нажатие просит подтверждение, второе — очищает историю.
-
-        Модальных окон в приложении нет, поэтому подтверждение встроено
-        в саму кнопку: она краснеет и меняет надпись на пять секунд.
-        """
-        if not self._history_available:
-            return
-        if not self._history_clear_armed:
-            self._arm_history_clear()
-            return
-        self._cancel_history_clear()
-        self._clear_history()
-
-    def _arm_history_clear(self) -> None:
-        """Взводит подтверждение очистки на _HISTORY_CLEAR_CONFIRM_MS."""
-        self._cancel_history_clear()
-        self._history_clear_armed = True
-        self.btn_clear_history.configure(
-            text="Точно очистить?",
-            fg_color=gui.COLOR_RED,
-            hover_color=gui.COLOR_RED_HOVER,
-        )
-        self._history_clear_timer = self.after(
-            _HISTORY_CLEAR_CONFIRM_MS, self._cancel_history_clear
-        )
-
-    def _cancel_history_clear(self) -> None:
-        """Снимает подтверждение и возвращает кнопке исходный вид."""
-        if self._history_clear_timer is not None:
-            with contextlib.suppress(tk.TclError):
-                self.after_cancel(self._history_clear_timer)
-            self._history_clear_timer = None
-        if not self._history_clear_armed:
-            return
-        self._history_clear_armed = False
-        with contextlib.suppress(tk.TclError):  # окно уже закрывается
-            if self.btn_clear_history.winfo_exists():
-                self.btn_clear_history.configure(
-                    text="Очистить историю 🗑",
-                    fg_color=gui.COLOR_GREY,
-                    hover_color=gui.COLOR_GREY_HOVER,
-                )
-
-    def _clear_history(self) -> None:
+    def _clear_history(self) -> int:
         """Удаляет записи из базы и все карточки из вкладки."""
         removed = self.history.clear()
-        for widget in self.history_scroll_frame.pack_slaves():
-            with contextlib.suppress(tk.TclError):
-                widget.destroy()
-        self._history_first = None
-        self._history_placeholder = None
-        self._show_history_placeholder("История пуста")
-        self.lbl_status.configure(
-            text=f"История очищена (удалено записей: {removed})", text_color="gray"
+        self.history_tab.clear_cards()
+        self.history_tab.show_placeholder("История пуста")
+        self.transcription.set_status(
+            f"История очищена (удалено записей: {removed})", STATUS_GRAY
         )
         logger.info("история очищена, удалено записей: %d", removed)
+        return removed
 
     # ------------------------------------------------------------------
     # модели
@@ -611,13 +358,13 @@ class NordScribeApp(ctk.CTk):
         )
 
         if clean_name in self.downloaded_whisper_models:
-            self.lbl_status.configure(
-                text=f"Выбрана модель '{clean_name}' (Локально)", text_color="green"
+            self.transcription.set_status(
+                f"Выбрана модель '{clean_name}' (Локально)", STATUS_GREEN
             )
         else:
-            self.lbl_status.configure(
-                text=f"Выбрана модель '{clean_name}' (Будет загружена при использовании)",
-                text_color="orange",
+            self.transcription.set_status(
+                f"Выбрана модель '{clean_name}' (Будет загружена при использовании)",
+                STATUS_ORANGE,
             )
 
     def open_model_manager(self) -> None:
@@ -655,34 +402,14 @@ class NordScribeApp(ctk.CTk):
     def _apply_controls(self) -> None:
         """Согласует состояние кнопок с текущими фоновыми задачами."""
         busy = self._download_active or self._transcription_active
-        self.btn_load_audio.configure(state="disabled" if busy else "normal")
-        self.whisper_menu.configure(state="disabled" if busy else "normal")
+        state = "disabled" if busy else "normal"
+        self.transcription.btn_load_audio.configure(state=state)
+        self.whisper_menu.configure(state=state)
         # Кнопку записи нельзя блокировать во время записи: ею же её и останавливают.
         if self.recorder.is_recording:
-            self.btn_record_mic.configure(state="normal")
+            self.transcription.btn_record_mic.configure(state="normal")
         else:
-            self.btn_record_mic.configure(state="disabled" if busy else "normal")
-
-    # ------------------------------------------------------------------
-    # индикатор прогресса
-    # ------------------------------------------------------------------
-
-    def _start_progress_animation(self) -> None:
-        """
-        Включает бегущую полосу.
-
-        Whisper не сообщает прогресс распознавания, поэтому честнее показать
-        «идёт работа», чем неподвижную полосу на нуле.
-        """
-        self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start()
-
-    def _stop_progress_animation(self, value: float | None = None) -> None:
-        """Возвращает полосу в обычный режим и при необходимости задаёт значение."""
-        self.progress_bar.stop()
-        self.progress_bar.configure(mode="determinate")
-        if value is not None:
-            self.progress_bar.set(value)
+            self.transcription.btn_record_mic.configure(state=state)
 
     # ------------------------------------------------------------------
     # запись с микрофона
@@ -703,41 +430,31 @@ class NordScribeApp(ctk.CTk):
             self.recorder.start()
         except ww.RecorderError as exc:
             logger.error("не удалось начать запись: %s", exc)
-            self.lbl_status.configure(text=f"Ошибка записи: {exc}", text_color=gui.COLOR_RED)
+            self.transcription.set_status(f"Ошибка записи: {exc}", COLOR_RED)
             return
 
-        self.btn_record_mic.configure(
-            text="⏹ Остановить запись",
-            fg_color=gui.COLOR_RED_HOVER,
-            hover_color=gui.COLOR_RED_ACTIVE,
+        self.transcription.set_recording(True)
+        self.transcription.set_status(
+            "🔴 Запись идёт... Нажмите «Остановить запись», когда закончите",
+            COLOR_RED,
         )
-        self.lbl_status.configure(
-            text="🔴 Запись идёт... Нажмите «Остановить запись», когда закончите",
-            text_color=gui.COLOR_RED,
-        )
-        self.txt_transcript.delete("1.0", "end")
+        self.transcription.clear_transcript()
         self._apply_controls()
 
     def stop_recording(self) -> None:
         """Останавливает запись и отправляет WAV на распознавание."""
-        self.btn_record_mic.configure(
-            text="🎤 Записать с микрофона",
-            fg_color=gui.COLOR_RED,
-            hover_color=gui.COLOR_RED_HOVER,
-        )
+        self.transcription.set_recording(False)
         try:
             temp_path = self.recorder.stop()
         except ww.RecorderError as exc:
             logger.error("не удалось сохранить запись: %s", exc)
-            self.lbl_status.configure(
-                text=f"Ошибка сохранения аудио: {exc}", text_color=gui.COLOR_RED
-            )
+            self.transcription.set_status(f"Ошибка сохранения аудио: {exc}", COLOR_RED)
             self._apply_controls()
             return
 
         self._apply_controls()
         if temp_path is None:
-            self.lbl_status.configure(text="Аудио не записано", text_color="gray")
+            self.transcription.set_status("Аудио не записано", STATUS_GRAY)
             return
         logger.info(
             "запись завершена: %.1f с, %d кадров в файле",
@@ -756,7 +473,7 @@ class NordScribeApp(ctk.CTk):
 
     def start_transcription_thread(self) -> None:
         """Спрашивает файл и ставит его в очередь на распознавание."""
-        file_path = filedialog.askopenfilename(
+        file_path = fd.askopenfilename(
             title="Выберите аудиофайл",
             filetypes=[
                 ("Аудио файлы", "*.mp3 *.wav *.ogg *.flac *.m4a"),
@@ -764,10 +481,10 @@ class NordScribeApp(ctk.CTk):
             ],
         )
         if not file_path:
-            self.lbl_status.configure(text="Файл не выбран", text_color="gray")
+            self.transcription.set_status("Файл не выбран", STATUS_GRAY)
             return
 
-        self.txt_transcript.delete("1.0", "end")
+        self.transcription.clear_transcript()
         self._submit_transcription(Path(file_path), is_temp=False)
 
     def _submit_transcription(self, audio_path: Path, is_temp: bool) -> None:
@@ -779,10 +496,8 @@ class NordScribeApp(ctk.CTk):
         """
         self._set_transcription_active(True)
         self._pending_temp = audio_path if is_temp else None
-        self.lbl_status.configure(
-            text=f"Обработка: {audio_path.name}", text_color=gui.COLOR_ACCENT
-        )
-        self._start_progress_animation()
+        self.transcription.set_status(f"Обработка: {audio_path.name}", COLOR_ACCENT)
+        self.transcription.start_progress_animation()
         logger.info("задача распознавания: %s (временный=%s)", audio_path, is_temp)
         self.worker.submit(
             audio_path,
@@ -797,9 +512,9 @@ class NordScribeApp(ctk.CTk):
 
     def _on_transcription_done(self, text: str, path: Path, is_temp: bool) -> None:
         """Успешное распознавание: показываем текст и убираем временный файл."""
-        self.txt_transcript.insert("1.0", text or "(речь не распознана)")
-        self._stop_progress_animation(1.0)
-        self.lbl_status.configure(text="Готово", text_color="green")
+        self.transcription.show_transcript(text or "(речь не распознана)")
+        self.transcription.stop_progress_animation(1.0)
+        self.transcription.set_status("Готово", STATUS_GREEN)
         if is_temp:
             ww.cleanup_temp_file(path)
             self._pending_temp = None
@@ -812,8 +527,8 @@ class NordScribeApp(ctk.CTk):
         if is_temp:
             ww.cleanup_temp_file(path)
             self._pending_temp = None
-        self._stop_progress_animation(0)
-        self.lbl_status.configure(text=f"Ошибка транскрибации: {exc}", text_color=gui.COLOR_RED)
+        self.transcription.stop_progress_animation(0)
+        self.transcription.set_status(f"Ошибка транскрибации: {exc}", COLOR_RED)
         self._set_transcription_active(False)
         logger.error("ошибка распознавания: %s", exc)
 
@@ -823,11 +538,11 @@ class NordScribeApp(ctk.CTk):
 
     def update_progressbar(self, value: float) -> None:
         """Устанавливает значение прогресс-бара из рабочего потока."""
-        self.after(0, lambda: self.progress_bar.set(value))
+        self.after(0, lambda: self.transcription.set_progress(value))
 
     def update_status(self, message: str) -> None:
         """Показывает статус из рабочего потока."""
-        self.after(0, lambda: self.lbl_status.configure(text=message))
+        self.after(0, lambda: self.transcription.set_status(message))
 
 
 def main() -> None:

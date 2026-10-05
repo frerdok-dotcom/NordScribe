@@ -22,6 +22,15 @@ import customtkinter as ctk
 
 import download_manager as dm
 from model_labels import MENU_COLOR_DOWNLOADED, MENU_COLOR_MISSING
+from theme import (
+    COLOR_ACCENT,
+    COLOR_BLUE,
+    COLOR_BLUE_HOVER,
+    COLOR_GREY,
+    COLOR_GREY_HOVER,
+    COLOR_RED,
+    COLOR_RED_HOVER,
+)
 
 __all__ = [
     "ModelManagerWindow",
@@ -30,19 +39,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-#: Палитра интерфейса. Приложение всегда работает в тёмной теме,
-#: поэтому цвета заданы явно.
-COLOR_RED = "#D32F2F"
-COLOR_RED_HOVER = "#B71C1C"
-COLOR_RED_ACTIVE = "#8E0000"
-COLOR_GREY = "#3A3A3A"
-COLOR_GREY_HOVER = "#4A4A4A"
-COLOR_BLUE = "#1F6AA5"
-COLOR_BLUE_HOVER = "#144870"
-COLOR_ACCENT = "#3B8ED0"
-COLOR_GREEN = "#2E7D32"
-COLOR_GREEN_HOVER = "#1B5E20"
 
 #: Через сколько миллисекунд снимается подтверждение удаления.
 _DELETE_CONFIRM_MS = 5000
