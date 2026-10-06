@@ -39,24 +39,27 @@ CLEAR_CONFIRM_MS = 5000
 CLEAR_LABEL = "Очистить историю 🗑"
 CLEAR_ARMED_LABEL = "Точно очистить?"
 
-#: Строк/единиц прокрутки на одно движение колеса мыши.
-WHEEL_SCROLL_LINES = 3
+#: Высота шага прокрутки колесом в пикселях (независимо от высоты карточек).
+WHEEL_SCROLL_PX = 90
 
 
-def _wheel_direction(event: tk.Event) -> int:
-    """Возвращает направление прокрутки: -1 — вверх, +1 — вниз.
+def _wheel_step(event: tk.Event) -> int:
+    """Возвращает шаг прокрутки: отрицательный — вверх, положительный — вниз.
 
     Учитывает различия платформ: Windows/macOS присылают ``delta``
-    (кратный 120 или 1), Linux/X11 — виртуальные кнопки Button-4/5.
+    (кратный 120 или ±1), Linux/X11 — виртуальные кнопки Button-4/5.
+    Крупные дельты нормализуются к одному «тику» (120), чтобы резкий рывок
+    колеса или трекпада не сбрасывал несколько экранов за раз.
     """
     delta = getattr(event, "delta", 0)
     if delta:
-        return -1 if delta > 0 else 1
+        step = min(abs(delta), 120)
+        return -step if delta > 0 else step
     button = getattr(event, "num", 0)
     if button == 4:
-        return -1
+        return -120
     if button == 5:
-        return 1
+        return 120
     return 0
 
 
@@ -79,6 +82,10 @@ class HistoryTab:
         self._clear_timer: str | None = None
         #: Привязка колеса мыши к canvas'у (см. _enable_mousewheel).
         self._wheel_binding: tuple[tk.Canvas, str] | None = None
+        #: Дочерние виджеты, чьё колесо перенаправлено списку.
+        self._wheel_rebound: list[tk.Misc] = []
+        #: Обновить привязки колеса после пересоздания карточек.
+        self._rebind_wheel: Callable[[], None] = lambda: None
 
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)  # растягивается список
@@ -117,19 +124,31 @@ class HistoryTab:
                 return found
         return None
 
+    def _find_scroll_canvas(self) -> tk.Canvas | None:
+        """Возвращает внутренний canvas прокручиваемой рамки.
+
+        ``CTkScrollableFrame`` хранит его в атрибуте ``_canvas``; запасной
+        путь — обход дерева виджетов по классу Tk (на случай изменения
+        внутренних имён в будущих версиях библиотеки).
+        """
+        canvas = getattr(self.scroll_frame, "_canvas", None)
+        if isinstance(canvas, tk.Canvas):
+            return canvas
+        return self._find_canvas(self.scroll_frame)
+
     def _enable_mousewheel(self) -> None:
         """Делает прокрутку колесом предсказуемой во всей вкладке.
 
-        Штатная обработка ``CTkScrollableFrame`` имеет два недостатка:
-        привязка идёт через ``bind_all`` (конфликтует с колесом других
-        скроллируемых виджетов), а на Linux шаг прокрутки зависит от
-        ``yscrollincrement`` — карточка выше шага не прокручивается вовсе,
-        что выглядит как залипание. Здесь колесо обрабатывается точечно:
-        привязка вешается только на сам список, один клик всегда даёт
-        фиксированный шаг, а события над полями текста карточек
-        перенаправляются списку.
+        Штатная обработка ``CTkScrollableFrame`` имеет три недостатка:
+        привязка идёт через ``bind_all`` (колесо одного виджета прокручивает
+        все скроллируемые области сразу), шаг «единицами» зависит от
+        ``yscrollincrement`` (карточка выше шага не прокручивается вовсе —
+        выглядит как залипание), а события над полем текста карточки
+        перехватывает само текстовое поле. Здесь колесо обрабатывается
+        точечно: только список, фиксированный шаг в пикселях, возврат
+        ``"break"`` против двойной прокрутки.
         """
-        canvas = self._find_canvas(self.scroll_frame)
+        canvas = self._find_scroll_canvas()
         if canvas is None:
             logger.warning("не найден canvas истории — прокрутка колесом стандартная")
             return
@@ -137,40 +156,66 @@ class HistoryTab:
         sequences = ("<MouseWheel>", "<Button-4>", "<Button-5>")
 
         def on_wheel(event: tk.Event) -> str:
-            direction = _wheel_direction(event)
-            if direction:
-                canvas.yview_scroll(direction * WHEEL_SCROLL_LINES, "units")
+            step = _wheel_step(event)
+            if step:
+                # Прокрутка в пикселях: одинаково плавный шаг независимо
+                # от высоты карточек и yscrollincrement. Один «тик» колеса
+                # (120) соответствует WHEEL_SCROLL_PX пикселей.
+                top, bottom = canvas.yview()
+                total = canvas.bbox("all")
+                if total is not None:
+                    height_px = max(total[3], 1)
+                    pixels = step / 120 * WHEEL_SCROLL_PX
+                    new_top = min(
+                        max(top + pixels / height_px, 0.0), max(1.0 - (bottom - top), 0.0)
+                    )
+                    canvas.yview_moveto(new_top)
             return "break"  # глобальный обработчик CTK больше не срабатывает
 
         for sequence in sequences:
-            funcid = canvas.bind(sequence, on_wheel, add=True)
+            funcid = canvas.bind(sequence, on_wheel, add="")
             self._wheel_binding = (canvas, funcid)
 
-        # Поле текста карточки перехватывает колесо (прокручивает себя),
-        # но у него всего 74px — реально оно не скроллит. Перенаправляем
-        # его события списку; break внутри on_wheel не даёт CTK проскроллить
-        # ещё и чужой виджет.
-        self.scroll_frame.bind(
-            "<Enter>",
-            lambda _e: [
-                w.bind(seq, on_wheel, add=True)
-                for w in self.scroll_frame.winfo_children()
-                if w.winfo_class() == "CTkTextbox"
-                for seq in sequences
-            ],
-            add=True,
-        )
+        # Поля текста карточек перехватывают колесо (прокручивают себя),
+        # но реально не скроллят — перенаправляем их события списку.
+        self._wheel_rebound = []
+
+        def rebind_children(_event: object = None) -> None:
+            """Вешает перенаправление колеса на поля текста карточек."""
+            for widget in canvas.winfo_children():
+                self._rebind_tree(widget, sequences, on_wheel)
+
+        self._rebind_wheel = rebind_children
+        rebind_children()
+
+    def _rebind_tree(
+        self,
+        widget: tk.Misc,
+        sequences: tuple[str, ...],
+        handler: Callable[[tk.Event], str],
+    ) -> None:
+        """Рекурсивно перенаправляет события колеса дочерних виджетов списку."""
+        if widget.winfo_class() in ("CTkTextbox", "Text"):
+            for sequence in sequences:
+                widget.bind(sequence, handler, add="")
+            self._wheel_rebound.append(widget)
+        for child in widget.winfo_children():
+            self._rebind_tree(child, sequences, handler)
 
     def disable_mousewheel(self) -> None:
         """Снимает привязку колеса (вызывается при закрытии приложения)."""
         binding = self._wheel_binding
-        if binding is None:
-            return
-        canvas, _funcid = binding
-        with contextlib.suppress(tk.TclError):
-            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-                canvas.unbind(sequence)
-        self._wheel_binding = None
+        if binding is not None:
+            canvas, _funcid = binding
+            with contextlib.suppress(tk.TclError):
+                for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                    canvas.unbind(sequence)
+            self._wheel_binding = None
+        for widget in getattr(self, "_wheel_rebound", []):
+            with contextlib.suppress(tk.TclError):
+                for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                    widget.unbind(sequence)
+        self._wheel_rebound = []
 
     # ------------------------------------------------------------------
     # наполнение списка
@@ -189,6 +234,7 @@ class HistoryTab:
                 self._first = card
         if not entries:
             self.show_placeholder("История пуста")
+        self._rebind_wheel()
 
     def prepend(self, entry: history.HistoryEntry) -> None:
         """Добавляет карточку в начало списка, без перезапуска приложения."""
@@ -203,6 +249,7 @@ class HistoryTab:
         else:
             card.pack(fill="x", padx=8, pady=(6, 0))
         self._first = card
+        self._rebind_wheel()
 
     def clear_cards(self) -> None:
         """Убирает все карточки и заглушку из списка."""
