@@ -39,6 +39,26 @@ CLEAR_CONFIRM_MS = 5000
 CLEAR_LABEL = "Очистить историю 🗑"
 CLEAR_ARMED_LABEL = "Точно очистить?"
 
+#: Строк/единиц прокрутки на одно движение колеса мыши.
+WHEEL_SCROLL_LINES = 3
+
+
+def _wheel_direction(event: tk.Event) -> int:
+    """Возвращает направление прокрутки: -1 — вверх, +1 — вниз.
+
+    Учитывает различия платформ: Windows/macOS присылают ``delta``
+    (кратный 120 или 1), Linux/X11 — виртуальные кнопки Button-4/5.
+    """
+    delta = getattr(event, "delta", 0)
+    if delta:
+        return -1 if delta > 0 else 1
+    button = getattr(event, "num", 0)
+    if button == 4:
+        return -1
+    if button == 5:
+        return 1
+    return 0
+
 
 class HistoryTab:
     """Список карточек истории внутри прокручиваемой рамки."""
@@ -57,6 +77,8 @@ class HistoryTab:
         self._placeholder: ctk.CTkFrame | None = None
         self._clear_armed = False
         self._clear_timer: str | None = None
+        #: Привязка колеса мыши к canvas'у (см. _enable_mousewheel).
+        self._wheel_binding: tuple[tk.Canvas, str] | None = None
 
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)  # растягивается список
@@ -79,6 +101,76 @@ class HistoryTab:
 
         self.scroll_frame = ctk.CTkScrollableFrame(parent)
         self.scroll_frame.grid(row=1, column=0, sticky="nsew")
+        self._enable_mousewheel()
+
+    # ------------------------------------------------------------------
+    # прокрутка колесом мыши
+    # ------------------------------------------------------------------
+
+    def _find_canvas(self, widget: tk.Misc) -> tk.Canvas | None:
+        """Ищет внутренний canvas прокручиваемой рамки по классу Tk."""
+        if widget.winfo_class() == "Canvas":
+            return widget  # type: ignore[return-value]
+        for child in widget.winfo_children():
+            found = self._find_canvas(child)
+            if found is not None:
+                return found
+        return None
+
+    def _enable_mousewheel(self) -> None:
+        """Делает прокрутку колесом предсказуемой во всей вкладке.
+
+        Штатная обработка ``CTkScrollableFrame`` имеет два недостатка:
+        привязка идёт через ``bind_all`` (конфликтует с колесом других
+        скроллируемых виджетов), а на Linux шаг прокрутки зависит от
+        ``yscrollincrement`` — карточка выше шага не прокручивается вовсе,
+        что выглядит как залипание. Здесь колесо обрабатывается точечно:
+        привязка вешается только на сам список, один клик всегда даёт
+        фиксированный шаг, а события над полями текста карточек
+        перенаправляются списку.
+        """
+        canvas = self._find_canvas(self.scroll_frame)
+        if canvas is None:
+            logger.warning("не найден canvas истории — прокрутка колесом стандартная")
+            return
+
+        sequences = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
+        def on_wheel(event: tk.Event) -> str:
+            direction = _wheel_direction(event)
+            if direction:
+                canvas.yview_scroll(direction * WHEEL_SCROLL_LINES, "units")
+            return "break"  # глобальный обработчик CTK больше не срабатывает
+
+        for sequence in sequences:
+            funcid = canvas.bind(sequence, on_wheel, add=True)
+            self._wheel_binding = (canvas, funcid)
+
+        # Поле текста карточки перехватывает колесо (прокручивает себя),
+        # но у него всего 74px — реально оно не скроллит. Перенаправляем
+        # его события списку; break внутри on_wheel не даёт CTK проскроллить
+        # ещё и чужой виджет.
+        self.scroll_frame.bind(
+            "<Enter>",
+            lambda _e: [
+                w.bind(seq, on_wheel, add=True)
+                for w in self.scroll_frame.winfo_children()
+                if w.winfo_class() == "CTkTextbox"
+                for seq in sequences
+            ],
+            add=True,
+        )
+
+    def disable_mousewheel(self) -> None:
+        """Снимает привязку колеса (вызывается при закрытии приложения)."""
+        binding = self._wheel_binding
+        if binding is None:
+            return
+        canvas, _funcid = binding
+        with contextlib.suppress(tk.TclError):
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                canvas.unbind(sequence)
+        self._wheel_binding = None
 
     # ------------------------------------------------------------------
     # наполнение списка
@@ -193,9 +285,7 @@ class HistoryTab:
         text_box.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 10))
         return card
 
-    def copy_text(
-        self, text: str, button: ctk.CTkButton, timer: dict[str, str | None]
-    ) -> None:
+    def copy_text(self, text: str, button: ctk.CTkButton, timer: dict[str, str | None]) -> None:
         """
         Копирует текст записи в системный буфер обмена и показывает отклик.
 
