@@ -42,6 +42,13 @@ CLEAR_ARMED_LABEL = "Точно очистить?"
 #: Высота шага прокрутки колесом в пикселях (независимо от высоты карточек).
 WHEEL_SCROLL_PX = 90
 
+#: Минимальная длительность «тика» колеса в мс: события чаще считаются
+#: инерцией трекпада/высокочастотного колеса и схлопываются в один шаг.
+WHEEL_TICK_MS = 30
+
+#: Последовательности событий колеса мыши, различающиеся по платформам.
+WHEEL_SEQUENCES = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+
 
 def _wheel_step(event: tk.Event) -> int:
     """Возвращает шаг прокрутки: отрицательный — вверх, положительный — вниз.
@@ -61,6 +68,24 @@ def _wheel_step(event: tk.Event) -> int:
     if button == 5:
         return 120
     return 0
+
+
+def _event_inside(widget: tk.Misc, event: tk.Event) -> bool:
+    """True, если курсор события находится внутри виджета (с потомками).
+
+    Привязка через ``bind_all`` приходит на все виджеты окна, поэтому перед
+    прокруткой проверяем координаты: иначе колесо над любой кнопкой
+    прокручивало бы историю.
+    """
+    try:
+        wx = widget.winfo_rootx()
+        wy = widget.winfo_rooty()
+        return (
+            wx <= event.x_root < wx + widget.winfo_width()
+            and wy <= event.y_root < wy + widget.winfo_height()
+        )
+    except tk.TclError:
+        return False
 
 
 class HistoryTab:
@@ -139,38 +164,94 @@ class HistoryTab:
     def _enable_mousewheel(self) -> None:
         """Делает прокрутку колесом предсказуемой во всей вкладке.
 
-        Штатная обработка ``CTkScrollableFrame`` имеет три недостатка:
-        привязка идёт через ``bind_all`` (колесо одного виджета прокручивает
-        все скроллируемые области сразу), шаг «единицами» зависит от
-        ``yscrollincrement`` (карточка выше шага не прокручивается вовсе —
-        выглядит как залипание), а события над полем текста карточки
-        перехватывает само текстовое поле. Здесь колесо обрабатывается
-        точечно: только список, фиксированный шаг в пикселях, возврат
-        ``"break"`` против двойной прокрутки.
+        Штатная обработка ``CTkScrollableFrame`` — главный источник жалоб
+        «залипает / глючит»:
+
+        * привязка идёт через ``bind_all``, поэтому история прокручивается
+          от колеса в ЛЮБОМ месте окна (даже над кнопками и полем вывода
+          другой вкладки), а несколько скроллируемых областей дергают друг
+          друга одновременно;
+        * шаг «единицами» зависит от ``yscrollincrement``: карточка выше
+          шага не прокручивается вовсе — выглядит как залипание;
+        * события над полем текста карточки перехватывает само текстовое
+          поле, которое почти ничего не скроллит — курсор на тексте, колесо
+          крутится, список стоит.
+
+        Здесь колесо обрабатывается точечно: фиксированный шаг в пикселях,
+        сглаживание инерции трекпада (частые события схлопываются в один
+        шаг), отмена неотработанного шага при смене направления, актуальный
+        ``scrollregion`` вместо устаревшего (он даёт деление на ноль).
+        Глобальная привязка CTK снимается и возвращается только на время,
+        пока курсор находится над списком истории.
         """
         canvas = self._find_scroll_canvas()
         if canvas is None:
             logger.warning("не найден canvas истории — прокрутка колесом стандартная")
             return
 
-        sequences = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+        sequences = WHEEL_SEQUENCES
 
-        def on_wheel(event: tk.Event) -> str:
+        # Снимаем глобальную привязку штатных обработчиков CTkScrollableFrame:
+        # без неё любое движение колеса в окне прокручивает этот список.
+        toplevel = canvas.winfo_toplevel()
+        for sequence in sequences:
+            with contextlib.suppress(tk.TclError):
+                toplevel.unbind_all(sequence)
+
+        state = {"last_ms": -1, "pending_step": 0, "pending_id": None}
+
+        def apply_scroll(step: int) -> None:
+            """Прокручивает canvas на ``step`` (в единицах дельты колеса)."""
+            state["pending_id"] = None
+            bbox = canvas.bbox("all")
+            if not bbox or bbox[3] <= 0:
+                return  # содержимого ещё нет — прокручивать нечего
+            height_px = bbox[3]
+            top, bottom = canvas.yview()
+            view = bottom - top
+            if view >= 1.0:
+                return  # всё помещается на экране — прокручивать нечего
+
+            pixels = step / 120 * WHEEL_SCROLL_PX
+            new_top = min(max(top + pixels / height_px, 0.0), max(1.0 - view, 0.0))
+            canvas.yview_moveto(new_top)
+
+        def cancel_pending() -> None:
+            pending_id = state["pending_id"]
+            if pending_id is not None:
+                with contextlib.suppress(tk.TclError):
+                    canvas.after_cancel(pending_id)
+                state["pending_id"] = None
+            state["pending_step"] = 0
+
+        def on_wheel(event: tk.Event) -> str | None:
+            # При связке bind_all событие приходит от любого виджета окна;
+            # реагируем, только если курсор над списком истории.
+            if not _event_inside(self.scroll_frame, event):
+                return None
+
             step = _wheel_step(event)
-            if step:
-                # Прокрутка в пикселях: одинаково плавный шаг независимо
-                # от высоты карточек и yscrollincrement. Один «тик» колеса
-                # (120) соответствует WHEEL_SCROLL_PX пикселей.
-                top, bottom = canvas.yview()
-                total = canvas.bbox("all")
-                if total is not None:
-                    height_px = max(total[3], 1)
-                    pixels = step / 120 * WHEEL_SCROLL_PX
-                    new_top = min(
-                        max(top + pixels / height_px, 0.0), max(1.0 - (bottom - top), 0.0)
-                    )
-                    canvas.yview_moveto(new_top)
-            return "break"  # глобальный обработчик CTK больше не срабатывает
+            if not step:
+                return "break"
+
+            now = getattr(event, "time", 0) or 0
+            last = state["last_ms"]
+            pending_step = state["pending_step"]
+
+            if last and 0 < now - last <= WHEEL_TICK_MS and pending_step * step > 0:
+                # Инерция трекпада / очень частое колесо того же направления:
+                # шаг уже запланирован, остальные события игнорируем — иначе
+                # одно движение превращается в рывок через несколько экранов.
+                return "break"
+            if pending_step * step < 0:
+                # Смена направления — отменяем неотработанный шаг,
+                # чтобы список не «дёргался» в обе стороны.
+                cancel_pending()
+
+            state["pending_step"] = step
+            state["last_ms"] = now
+            state["pending_id"] = canvas.after(8, apply_scroll, step)
+            return "break"  # другие обработчики этого события не срабатывают
 
         for sequence in sequences:
             funcid = canvas.bind(sequence, on_wheel, add="")
@@ -188,11 +269,44 @@ class HistoryTab:
         self._rebind_wheel = rebind_children
         rebind_children()
 
+        # Глобальная привязка активна, только пока курсор внутри списка:
+        # так колесо работает над любой точкой истории (включая полосы
+        # прокрутки и зазоры), но молчит, когда курсор ушёл на другие
+        # вкладки и виджеты.
+        def enter(_event: tk.Event) -> None:
+            for sequence in sequences:
+                toplevel.bind_all(sequence, on_wheel, add="")
+
+        def leave(_event: tk.Event) -> None:
+            cancel_pending()
+            for sequence in sequences:
+                toplevel.unbind_all(sequence)
+
+        self.scroll_frame.bind("<Enter>", enter, add="")
+        self.scroll_frame.bind("<Leave>", leave, add="")
+
+    def disable_mousewheel(self) -> None:
+        """Снимает привязку колеса (вызывается при закрытии приложения)."""
+        binding = self._wheel_binding
+        if binding is not None:
+            canvas, _funcid = binding
+            with contextlib.suppress(tk.TclError):
+                toplevel = canvas.winfo_toplevel()
+                for sequence in WHEEL_SEQUENCES:
+                    canvas.unbind(sequence)
+                    toplevel.unbind_all(sequence)
+            self._wheel_binding = None
+        for widget in getattr(self, "_wheel_rebound", []):
+            with contextlib.suppress(tk.TclError):
+                for sequence in WHEEL_SEQUENCES:
+                    widget.unbind(sequence)
+        self._wheel_rebound = []
+
     def _rebind_tree(
         self,
         widget: tk.Misc,
         sequences: tuple[str, ...],
-        handler: Callable[[tk.Event], str],
+        handler: Callable[[tk.Event], str | None],
     ) -> None:
         """Рекурсивно перенаправляет события колеса дочерних виджетов списку."""
         if widget.winfo_class() in ("CTkTextbox", "Text"):
@@ -201,21 +315,6 @@ class HistoryTab:
             self._wheel_rebound.append(widget)
         for child in widget.winfo_children():
             self._rebind_tree(child, sequences, handler)
-
-    def disable_mousewheel(self) -> None:
-        """Снимает привязку колеса (вызывается при закрытии приложения)."""
-        binding = self._wheel_binding
-        if binding is not None:
-            canvas, _funcid = binding
-            with contextlib.suppress(tk.TclError):
-                for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-                    canvas.unbind(sequence)
-            self._wheel_binding = None
-        for widget in getattr(self, "_wheel_rebound", []):
-            with contextlib.suppress(tk.TclError):
-                for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-                    widget.unbind(sequence)
-        self._wheel_rebound = []
 
     # ------------------------------------------------------------------
     # наполнение списка
