@@ -172,6 +172,7 @@ class NordScribeApp(ctk.CTk):
         временный WAV: запись не останавливалась, а файл никто не удалял.
         """
         self.history_tab.cancel_clear()
+        self.history_tab.disable_mousewheel()
         if self.recorder.is_recording:
             try:
                 ww.cleanup_temp_file(self.recorder.stop())
@@ -308,9 +309,7 @@ class NordScribeApp(ctk.CTk):
         removed = self.history.clear()
         self.history_tab.clear_cards()
         self.history_tab.show_placeholder("История пуста")
-        self.transcription.set_status(
-            f"История очищена (удалено записей: {removed})", STATUS_GRAY
-        )
+        self.transcription.set_status(f"История очищена (удалено записей: {removed})", STATUS_GRAY)
         logger.info("история очищена, удалено записей: %d", removed)
         return removed
 
