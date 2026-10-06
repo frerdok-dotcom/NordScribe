@@ -40,33 +40,38 @@ CLEAR_LABEL = "Очистить историю 🗑"
 CLEAR_ARMED_LABEL = "Точно очистить?"
 
 #: Высота шага прокрутки колесом в пикселях (независимо от высоты карточек).
-WHEEL_SCROLL_PX = 90
+#: Подбирается автоматически по высоте видимой области списка.
+WHEEL_SCROLL_FRACTION = 0.30
 
-#: Минимальная длительность «тика» колеса в мс: события чаще считаются
-#: инерцией трекпада/высокочастотного колеса и схлопываются в один шаг.
-WHEEL_TICK_MS = 30
+#: Минимальный/максимальный шаг прокрутки в пикселях.
+WHEEL_SCROLL_MIN_PX = 60
+WHEEL_SCROLL_MAX_PX = 220
+
+#: Максимум шагов прокрутки из очереди за один проход цикла Tk.
+#: Ограничивает «рывки» после лага: накопившиеся события отрабатываются
+#: не целиком, а частями — список идёт плавно и предсказуемо.
+WHEEL_MAX_STEPS_PER_FLUSH = 1
 
 #: Последовательности событий колеса мыши, различающиеся по платформам.
 WHEEL_SEQUENCES = ("<MouseWheel>", "<Button-4>", "<Button-5>")
 
 
-def _wheel_step(event: tk.Event) -> int:
-    """Возвращает шаг прокрутки: отрицательный — вверх, положительный — вниз.
+def _wheel_direction(event: tk.Event) -> int:
+    """Возвращает направление прокрутки: -1 — вверх, +1 — вниз, 0 — нет события.
 
-    Учитывает различия платформ: Windows/macOS присылают ``delta``
-    (кратный 120 или ±1), Linux/X11 — виртуальные кнопки Button-4/5.
-    Крупные дельты нормализуются к одному «тику» (120), чтобы резкий рывок
-    колеса или трекпада не сбрасывал несколько экранов за раз.
+    Учитывает различия платформ: Windows/macOS присылают ``delta``,
+    Linux/X11 — виртуальные кнопки Button-4/5. Величина дельты не важна:
+    одно движение колеса = один фиксированный шаг, иначе высокочастотные
+    колёса и трекпады прокручивают список «через край».
     """
     delta = getattr(event, "delta", 0)
     if delta:
-        step = min(abs(delta), 120)
-        return -step if delta > 0 else step
+        return -1 if delta > 0 else 1
     button = getattr(event, "num", 0)
     if button == 4:
-        return -120
+        return -1
     if button == 5:
-        return 120
+        return 1
     return 0
 
 
@@ -152,13 +157,14 @@ class HistoryTab:
     def _find_scroll_canvas(self) -> tk.Canvas | None:
         """Возвращает внутренний canvas прокручиваемой рамки.
 
-        ``CTkScrollableFrame`` хранит его в атрибуте ``_canvas``; запасной
-        путь — обход дерева виджетов по классу Tk (на случай изменения
-        внутренних имён в будущих версиях библиотеки).
+        В разных версиях ``customtkinter`` полотно называется по-разному
+        (``_parent_canvas`` / ``_canvas``), поэтому перебираем известные
+        имена; запасной путь — обход дерева виджетов по классу Tk.
         """
-        canvas = getattr(self.scroll_frame, "_canvas", None)
-        if isinstance(canvas, tk.Canvas):
-            return canvas
+        for attr in ("_parent_canvas", "_canvas"):
+            canvas = getattr(self.scroll_frame, attr, None)
+            if isinstance(canvas, tk.Canvas):
+                return canvas
         return self._find_canvas(self.scroll_frame)
 
     def _enable_mousewheel(self) -> None:
@@ -171,16 +177,25 @@ class HistoryTab:
           от колеса в ЛЮБОМ месте окна (даже над кнопками и полем вывода
           другой вкладки), а несколько скроллируемых областей дергают друг
           друга одновременно;
-        * шаг «единицами» зависит от ``yscrollincrement``: карточка выше
-          шага не прокручивается вовсе — выглядит как залипание;
+        * шаг «единицами» зависит от ``yscrollincrement`` (Windows: 1 px,
+          Linux: 30 px на тик) — колесо то еле ползёт, то перескакивает
+          полэкрана;
         * события над полем текста карточки перехватывает само текстовое
           поле, которое почти ничего не скроллит — курсор на тексте, колесо
           крутится, список стоит.
 
-        Здесь колесо обрабатывается точечно: фиксированный шаг в пикселях,
-        сглаживание инерции трекпада (частые события схлопываются в один
-        шаг), отмена неотработанного шага при смене направления, актуальный
-        ``scrollregion`` вместо устаревшего (он даёт деление на ноль).
+        Здесь своя механика:
+        * фиксированный шаг пропорционален высоте видимой области (~30 %
+          экрана, но не меньше ``WHEEL_SCROLL_MIN_PX`` и не больше
+          ``WHEEL_SCROLL_MAX_PX``);
+        * очередь направлений вместо дебаунса по времени: каждое движение
+          колеса даёт ровно один шаг, инерционные хвосты трекпада
+          схлопываются, а при резкой смене направления противоположные
+          шаги компенсируют друг друга;
+        * прокрутка выполняется батчем из цикла Tk (не более
+          ``WHEEL_MAX_STEPS_PER_FLUSH`` шагов за проход) — после лага
+          накопленные события не превращаются в рывок через весь список;
+        * актуальный ``scrollregion`` пересчитывается перед каждым шагом.
         Глобальная привязка CTK снимается и возвращается только на время,
         пока курсор находится над списком истории.
         """
@@ -198,31 +213,72 @@ class HistoryTab:
             with contextlib.suppress(tk.TclError):
                 toplevel.unbind_all(sequence)
 
-        state = {"last_ms": -1, "pending_step": 0, "pending_id": None}
+        state = {"queue": [], "flush_id": None, "scheduled": False}
 
-        def apply_scroll(step: int) -> None:
-            """Прокручивает canvas на ``step`` (в единицах дельты колеса)."""
-            state["pending_id"] = None
-            bbox = canvas.bbox("all")
-            if not bbox or bbox[3] <= 0:
-                return  # содержимого ещё нет — прокручивать нечего
-            height_px = bbox[3]
-            top, bottom = canvas.yview()
-            view = bottom - top
-            if view >= 1.0:
-                return  # всё помещается на экране — прокручивать нечего
+        def scroll_one(direction: int) -> None:
+            """Прокручивает canvas на один шаг в сторону ``direction``."""
+            # Актуальные размеры: scrollregion обновляется привязкой к
+            # <Configure>, но после добавления карточек его лучше взять заново.
+            with contextlib.suppress(tk.TclError):
+                canvas.update_idletasks()
+                bbox = canvas.bbox("all")
+                if not bbox or bbox[3] <= 0:
+                    return  # содержимого ещё нет — прокручивать нечего
+                height_px = bbox[3]
+                top, bottom = canvas.yview()
+                view = bottom - top
+                if view >= 1.0:
+                    return  # всё помещается на экране — прокручивать нечего
 
-            pixels = step / 120 * WHEEL_SCROLL_PX
-            new_top = min(max(top + pixels / height_px, 0.0), max(1.0 - view, 0.0))
-            canvas.yview_moveto(new_top)
+                viewport_px = max(canvas.winfo_height(), 1)
+                step_px = min(
+                    max(viewport_px * WHEEL_SCROLL_FRACTION, WHEEL_SCROLL_MIN_PX),
+                    WHEEL_SCROLL_MAX_PX,
+                )
+                new_top = min(
+                    max(top + direction * step_px / height_px, 0.0),
+                    max(1.0 - view, 0.0),
+                )
+                canvas.yview_moveto(new_top)
+
+        def flush() -> None:
+            """Обрабатывает накопленные шаги (с компенсацией направлений)."""
+            state["flush_id"] = None
+            queue = state["queue"]
+            if not queue:
+                state["scheduled"] = False
+                return
+            # Направления складываются: +1 и -1 гасят друг друга. За один
+            # проход — не больше WHEEL_MAX_STEPS_PER_FLUSH шагов; остаток
+            # очереди переносится на следующий, чтобы после лага список
+            # не «летел» через весь контент одним рывком.
+            net = sum(queue)
+            steps = abs(net)
+            direction = 1 if net > 0 else -1
+            done = min(steps, WHEEL_MAX_STEPS_PER_FLUSH)
+            for _ in range(done):
+                scroll_one(direction)
+            leftover = steps - done
+            if leftover:
+                state["queue"] = [direction] * leftover
+                schedule_flush()
+            else:
+                state["queue"] = []
+                state["scheduled"] = False
+
+        def schedule_flush() -> None:
+            if not state["scheduled"]:
+                state["scheduled"] = True
+                state["flush_id"] = canvas.after(16, flush)
 
         def cancel_pending() -> None:
-            pending_id = state["pending_id"]
-            if pending_id is not None:
+            flush_id = state["flush_id"]
+            if flush_id is not None:
                 with contextlib.suppress(tk.TclError):
-                    canvas.after_cancel(pending_id)
-                state["pending_id"] = None
-            state["pending_step"] = 0
+                    canvas.after_cancel(flush_id)
+                state["flush_id"] = None
+            state["queue"] = []
+            state["scheduled"] = False
 
         def on_wheel(event: tk.Event) -> str | None:
             # При связке bind_all событие приходит от любого виджета окна;
@@ -230,27 +286,15 @@ class HistoryTab:
             if not _event_inside(self.scroll_frame, event):
                 return None
 
-            step = _wheel_step(event)
-            if not step:
+            direction = _wheel_direction(event)
+            if not direction:
                 return "break"
 
-            now = getattr(event, "time", 0) or 0
-            last = state["last_ms"]
-            pending_step = state["pending_step"]
-
-            if last and 0 < now - last <= WHEEL_TICK_MS and pending_step * step > 0:
-                # Инерция трекпада / очень частое колесо того же направления:
-                # шаг уже запланирован, остальные события игнорируем — иначе
-                # одно движение превращается в рывок через несколько экранов.
-                return "break"
-            if pending_step * step < 0:
-                # Смена направления — отменяем неотработанный шаг,
-                # чтобы список не «дёргался» в обе стороны.
-                cancel_pending()
-
-            state["pending_step"] = step
-            state["last_ms"] = now
-            state["pending_id"] = canvas.after(8, apply_scroll, step)
+            # Простая очередь направлений: +1 и -1 гасят друг друга при
+            # флэтере, каждое не скомпенсированное движение колеса даёт
+            # ровно один фиксированный шаг прокрутки.
+            state["queue"].append(direction)
+            schedule_flush()
             return "break"  # другие обработчики этого события не срабатывают
 
         for sequence in sequences:
@@ -270,9 +314,9 @@ class HistoryTab:
         rebind_children()
 
         # Глобальная привязка активна, только пока курсор внутри списка:
-        # так колесо работает над любой точкой истории (включая полосы
-        # прокрутки и зазоры), но молчит, когда курсор ушёл на другие
-        # вкладки и виджеты.
+        # так колесо работает над любой точкой истории (включая полосу
+        # прокрутки, зазоры и дочерние фреймы карточек), но молчит, когда
+        # курсор ушёл на другие вкладки и виджеты.
         def enter(_event: tk.Event) -> None:
             for sequence in sequences:
                 toplevel.bind_all(sequence, on_wheel, add="")
@@ -284,6 +328,16 @@ class HistoryTab:
 
         self.scroll_frame.bind("<Enter>", enter, add="")
         self.scroll_frame.bind("<Leave>", leave, add="")
+
+        # Полоса прокрутки CTk перехватывает колесо у себя и скроллит
+        # «единицами» canvas (на Windows это 1 px за тик — почти стоячая
+        # прокрутка). Перенаправляем её события на общий обработчик.
+        scrollbar = getattr(self.scroll_frame, "_scrollbar", None)
+        sb_canvas = getattr(scrollbar, "_canvas", None)
+        if isinstance(sb_canvas, tk.Canvas):
+            for sequence in sequences:
+                funcid = sb_canvas.bind(sequence, on_wheel, add="")
+                self._wheel_rebound.append(sb_canvas)
 
     def disable_mousewheel(self) -> None:
         """Снимает привязку колеса (вызывается при закрытии приложения)."""
