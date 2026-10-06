@@ -56,20 +56,13 @@ class TranscriptionTab:
         self._emoji_family = emoji_family
 
         parent.grid_columnconfigure(0, weight=1)
-        parent.grid_rowconfigure(1, weight=1)  # растягивается поле вывода
-
-        self.lbl_transcript = ctk.CTkLabel(
-            parent,
-            text="🎙️ Транскрибация (Whisper)",
-            font=ctk.CTkFont(size=18, weight="bold"),
-        )
-        self.lbl_transcript.grid(row=0, column=0, sticky="nw", pady=(4, 10))
+        parent.grid_rowconfigure(0, weight=1)  # растягивается поле вывода
 
         self.txt_transcript = ctk.CTkTextbox(parent, wrap="word", font=ctk.CTkFont(size=14))
-        self.txt_transcript.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        self.txt_transcript.grid(row=0, column=0, sticky="nsew", pady=(4, 10))
 
         self.frame_controls = ctk.CTkFrame(parent, fg_color="transparent")
-        self.frame_controls.grid(row=2, column=0, sticky="ew")
+        self.frame_controls.grid(row=1, column=0, sticky="ew")
         self.frame_controls.grid_columnconfigure((0, 1), weight=1)
 
         self.btn_load_audio = ctk.CTkButton(
