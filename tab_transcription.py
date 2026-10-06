@@ -10,21 +10,35 @@
 
 from __future__ import annotations
 
+import contextlib
+import logging
+import tkinter as tk
 from collections.abc import Callable
 
 import customtkinter as ctk
 
 from theme import (
+    COLOR_GREEN,
+    COLOR_GREEN_HOVER,
+    COLOR_GREY,
+    COLOR_GREY_HOVER,
     COLOR_RED,
     COLOR_RED_ACTIVE,
     COLOR_RED_HOVER,
     STATUS_GRAY,
+    ui_font,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TranscriptionTab"]
 
 #: Текст строки состояния, когда задача ещё не начата.
 IDLE_STATUS = "Готов к работе"
+
+#: Надписи кнопки копирования: обычная / подтверждение.
+COPY_LABEL = "Копировать 📋"
+COPIED_LABEL = "Скопировано! ✅"
 
 
 class TranscriptionTab:
@@ -78,8 +92,23 @@ class TranscriptionTab:
         )
         self.btn_record_mic.grid(row=0, column=1, padx=(10, 0), pady=(0, 10), sticky="ew")
 
+        # Кнопка копирования результата: третьим элементом в ряду кнопок.
+        self.frame_controls.grid_columnconfigure(2, weight=0)
+        self._copy_timer: dict[str, str | None] = {"after_id": None}
+        self.btn_copy = ctk.CTkButton(
+            self.frame_controls,
+            text=COPY_LABEL,
+            command=self.copy_transcript,
+            width=150,
+            height=45,
+            font=ui_font(self._emoji_family, size=14),
+            fg_color=COLOR_GREY,
+            hover_color=COLOR_GREY_HOVER,
+        )
+        self.btn_copy.grid(row=0, column=2, padx=(10, 0), pady=(0, 10), sticky="ew")
+
         self.progress_bar = ctk.CTkProgressBar(self.frame_controls, height=10)
-        self.progress_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 10))
+        self.progress_bar.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(5, 10))
         self.progress_bar.set(0)
 
         self.lbl_status = ctk.CTkLabel(
@@ -88,7 +117,7 @@ class TranscriptionTab:
             text_color=STATUS_GRAY,
             font=ctk.CTkFont(size=13),
         )
-        self.lbl_status.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        self.lbl_status.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 5))
 
     # надписи кнопки записи: обычная / идущая запись
     RECORD_LABEL = "🎤 Записать с микрофона"
@@ -105,6 +134,55 @@ class TranscriptionTab:
     def show_transcript(self, text: str) -> None:
         """Вставляет результат распознавания в поле вывода."""
         self.txt_transcript.insert("1.0", text)
+
+    def copy_transcript(self) -> None:
+        """
+        Копирует весь текст из поля вывода в системный буфер обмена.
+
+        Пустое поле не копируется — вместо этого показывается подсказка.
+        При успехе кнопка на 1.5 секунды становится зелёной с надписью
+        «Скопировано! ✅»; повторный клик перезапускает таймер,
+        а не наслаивает второй.
+        """
+        text = self.txt_transcript.get("1.0", "end-1c").strip()
+        if not text:
+            self.set_status("Нечего копировать — поле пустое", color=STATUS_GRAY)
+            return
+
+        button = self.btn_copy
+        try:
+            button.clipboard_clear()
+            button.clipboard_append(text)
+            button.update_idletasks()
+        except tk.TclError as exc:
+            logger.warning("буфер обмена недоступен: %s", exc)
+            self.set_status("Буфер обмена недоступен", color=COLOR_RED)
+            return
+
+        previous = self._copy_timer.get("after_id")
+        if previous:
+            with contextlib.suppress(tk.TclError):
+                button.after_cancel(previous)
+
+        button.configure(
+            text=COPIED_LABEL,
+            fg_color=COLOR_GREEN,
+            hover_color=COLOR_GREEN_HOVER,
+        )
+
+        def restore() -> None:
+            self._copy_timer["after_id"] = None
+            try:
+                if button.winfo_exists():
+                    button.configure(
+                        text=COPY_LABEL,
+                        fg_color=COLOR_GREY,
+                        hover_color=COLOR_GREY_HOVER,
+                    )
+            except tk.TclError:
+                pass  # виджет успели уничтожить
+
+        self._copy_timer["after_id"] = button.after(1500, restore)
 
     def set_recording(self, active: bool) -> None:
         """Переключает кнопку записи между режимами «записать»/«остановить»."""
