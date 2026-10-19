@@ -556,7 +556,10 @@ class WhisperWorker:
                 str(audio_path),
                 language=self._language,
                 task="transcribe",
-                verbose=False,
+                # None (а не False) отключает и печать сегментов, и прогресс-бар
+                # tqdm: в windowed-сборке sys.stderr равен None, и tqdm падал
+                # с AttributeError: 'NoneType' object has no attribute 'write'.
+                verbose=None,
             )
         except TranscriptionError:
             raise

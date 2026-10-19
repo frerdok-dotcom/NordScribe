@@ -21,7 +21,9 @@ NordScribe — локальная транскрибация аудио чере
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import re
+import sys
 from pathlib import Path
 from tkinter import filedialog as fd
 
@@ -544,9 +546,102 @@ class NordScribeApp(ctk.CTk):
         self.after(0, lambda: self.transcription.set_status(message))
 
 
+def _selftest_audio_path(argv: list[str]) -> Path | None:
+    """Возвращает путь к аудио из аргумента ``--selftest-audio`` (если он есть)."""
+    for index, arg in enumerate(argv):
+        if arg == "--selftest-audio" and index + 1 < len(argv):
+            return Path(argv[index + 1])
+        if arg.startswith("--selftest-audio="):
+            return Path(arg.partition("=")[2])
+    return None
+
+
+def _selftest_model() -> str | None:
+    """Выбирает самую маленькую уже скачанную модель, ничего не скачивая."""
+    available = dm.get_downloaded_whisper_models()
+    for name in dm.WHISPER_MODELS:
+        if name in available:
+            return name
+    return None
+
+
+def _run_selftest(audio_path: Path | None) -> int:
+    """
+    Диагностический прогон собранного приложения без участия пользователя.
+
+    Проверяет импорт всех слоёв (в том числе torch и Whisper), создание
+    главного окна, проверки окружения и — если передан WAV — реальное
+    распознавание скачанной моделью. Результат пишется в обычный журнал,
+    код возврата: 0 — успех, 1 — ошибка, 2 — нет данных для распознавания.
+    """
+    log_path = app_settings.setup_logging(console=not getattr(sys, "frozen", False))
+    logger.info(
+        "SELFTEST: старт (frozen=%s, exe=%s, _MEIPASS=%s, журнал=%s)",
+        getattr(sys, "frozen", False),
+        sys.executable,
+        getattr(sys, "_MEIPASS", "-"),
+        log_path,
+    )
+    try:
+        results = preflight.run_checks()
+        for result in results:
+            logger.info(
+                "SELFTEST: проверка «%s»: %s — %s",
+                result.name,
+                "ok" if result.ok else "нет",
+                result.detail,
+            )
+
+        ctk.set_appearance_mode("Dark")
+        ctk.set_default_color_theme("blue")
+        config = app_settings.Settings.load()
+        app = NordScribeApp(config)
+        app.update_idletasks()
+        app.update()
+        logger.info("SELFTEST: главное окно построено (%s)", app.geometry())
+        app.destroy()
+        logger.info("SELFTEST: главное окно закрыто")
+
+        if audio_path is None:
+            logger.info("SELFTEST: OK (распознавание пропущено: не передан WAV)")
+            return 0
+        if not audio_path.is_file():
+            logger.error("SELFTEST: файл не найден: %s", audio_path)
+            return 2
+        model_name = _selftest_model()
+        if model_name is None:
+            logger.warning("SELFTEST: нет скачанных моделей — распознавание пропущено")
+            return 2
+
+        worker = ww.WhisperWorker(
+            model_name_provider=lambda: model_name,
+            language="en",
+            verify_cache=False,
+        )
+        try:
+            text = worker.transcribe(
+                audio_path,
+                on_status=lambda message: logger.info("SELFTEST: %s", message),
+            )
+        finally:
+            worker.shutdown(wait=True)
+        logger.info("SELFTEST: модель %s, символов %d: %r", model_name, len(text), text[:200])
+        if not text.strip():
+            logger.error("SELFTEST: речь не распознана")
+            return 1
+        logger.info("SELFTEST: OK")
+        return 0
+    except Exception:
+        logger.exception("SELFTEST: ОШИБКА")
+        return 1
+
+
 def main() -> None:
     """Настраивает журнал, читает настройки и запускает цикл обработки событий."""
-    log_path = app_settings.setup_logging()
+    if "--selftest" in sys.argv[1:]:
+        raise SystemExit(_run_selftest(_selftest_audio_path(sys.argv[1:])))
+
+    log_path = app_settings.setup_logging(console=not getattr(sys, "frozen", False))
     logger.info("NordScribe запускается (журнал: %s)", log_path)
 
     ctk.set_appearance_mode("Dark")
@@ -565,4 +660,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

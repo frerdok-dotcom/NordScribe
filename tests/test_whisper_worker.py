@@ -337,6 +337,19 @@ class WhisperWorkerTest(unittest.TestCase):
         self.assertIsInstance(errors[0], ww.TranscriptionError)
         self.assertIn("битый файл", str(errors[0]))
 
+    def test_transcribe_disables_tqdm_progress(self) -> None:
+        """verbose=False включает tqdm и падает в windowed-сборке без stderr."""
+        calls: list[dict[str, object]] = []
+
+        class Recording(FakeModel):
+            def transcribe(self, path: str, **kwargs: object) -> dict[str, str]:
+                calls.append(kwargs)
+                return {"text": "готово"}
+
+        with mock.patch.object(ww.whisper, "load_model", return_value=Recording("x")):
+            self.worker.submit(Path("a.wav"), lambda t, p: None, lambda e: None).result(timeout=10)
+        self.assertIsNone(calls[0]["verbose"])
+
     def test_tasks_are_serialised(self) -> None:
         order: list[str] = []
 

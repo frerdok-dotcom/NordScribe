@@ -48,6 +48,32 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## 📦 Сборка .exe
+
+Установите PyInstaller и соберите однофайловый exe по готовому `main.spec`:
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --clean main.spec
+```
+
+Готовый файл — `dist/NordScribe.exe`. Первый запуск занимает несколько секунд:
+PyInstaller распаковывает зависимости во временный каталог. FFmpeg и веса
+моделей в exe не входят — они по-прежнему нужны в `PATH` и в `~/.cache/whisper`.
+
+Проверка собранного приложения без ручных кликов:
+
+```bash
+dist\NordScribe.exe --selftest
+dist\NordScribe.exe --selftest --selftest-audio sample.wav
+```
+
+`--selftest` проверяет импорт всех слоёв, создание главного окна и проверки
+окружения; с `--selftest-audio` дополнительно распознаёт указанный WAV уже
+скачанной моделью. Код возврата: 0 — успех, 1 — ошибка, 2 — нечего
+распознавать (нет файла или скачанных моделей). Результат пишется в обычный
+журнал `~/.nordscribe/nordscribe.log`.
+
 ## 📁 Структура проекта
 
 Код разделён по слоям: бэкенд ничего не знает о графическом интерфейсе,
