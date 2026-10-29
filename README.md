@@ -1,5 +1,7 @@
 # NordScribe 🎙️
 
+![Логотип NordScribe](src/nordscribe/assets/logo_256.png)
+
 [![CI](https://github.com/frerdok-dotcom/NordScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/frerdok-dotcom/NordScribe/actions/workflows/ci.yml)
 
 **NordScribe** — десктопное приложение для полностью локальной и
@@ -99,6 +101,23 @@ pyinstaller --noconfirm --clean packaging/NordScribe.spec
 по-прежнему нужны в `PATH` и в `~/.cache/whisper`. Первый запуск занимает
 несколько секунд: PyInstaller распаковывает зависимости во временный каталог.
 
+Сборка использует логотип из `src/nordscribe/assets/logo.ico`: он встроен в
+exe, поэтому ярлык и панель задач получают правильную иконку.
+
+### Ярлык на рабочем столе
+
+После сборки:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\Create-Shortcut.ps1
+```
+
+Скрипт создаёт `NordScribe.lnk` на рабочем столе с иконкой exe. Другой путь:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\Create-Shortcut.ps1 -ShortcutPath .\dist\NordScribe.lnk
+```
+
 Сборка проверяется вручную workflow
 [`.github/workflows/build-windows.yml`](.github/workflows/build-windows.yml).
 
@@ -115,7 +134,7 @@ src/nordscribe/
 └── ui/               # theme, dispatcher, widgets, вкладки, окна
 tests/                # unit-тесты + архитектурные тесты
 docs/                 # ARCHITECTURE, AUDIT, CODEGRAPH, ADR
-packaging/            # PyInstaller spec
+packaging/            # PyInstaller spec + Create-Shortcut.ps1
 ```
 
 Слои и зависимости: `core <- infra <- services <- ui`; `app.py` и

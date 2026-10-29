@@ -64,6 +64,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+nordscribe = ["assets/*.png", "assets/*.ico"]
+
 [tool.setuptools.dynamic]
 version = { attr = "nordscribe.__version__" }
 

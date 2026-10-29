@@ -6,6 +6,13 @@ All notable changes to NordScribe are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Application logo in `src/nordscribe/assets`: window/taskbar icon and the
+  multi-size `.ico` embedded in the Windows executable. The wordmark was
+  removed and the emblem enlarged so it reads better at small icon sizes.
+- `packaging/Create-Shortcut.ps1` for a desktop shortcut that uses the EXE icon.
+
 ## [1.1.0] — 2026-10-29
 
 ### Added

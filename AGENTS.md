@@ -85,6 +85,7 @@ On Linux/macOS use `.venv/bin/...` and `python3`. Tests get the package from
 | Add a setting | `infra/settings.py` (`Settings`), UI that reads it, tests |
 | Change history schema or queries | `infra/history.py`, tests, migration note |
 | Change colours/fonts | `ui/theme.py` |
+| Change the window/exe icon | `src/nordscribe/assets/`, `ui/icon.py`, `packaging/NordScribe.spec` |
 | Add a tab or widget | `ui/`, wire it in `ui/main_window.py` |
 | Change the composition/CLI | `app.py`, `cli.py` |
 | Change packaging | `packaging/NordScribe.spec`, CI workflow |

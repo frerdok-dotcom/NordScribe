@@ -15,10 +15,18 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metada
 
 project_root = Path(SPECPATH).parent
 src = project_root / "src"
+assets = src / "nordscribe" / "assets"
 
 datas = []
 binaries = []
 hiddenimports = ["whisper", "scipy.special", "scipy.linalg"]
+
+# Application logo: the PNG is used by Tk, the ICO by the EXE and Windows.
+datas += [
+    (str(assets / "logo.png"), "nordscribe/assets"),
+    (str(assets / "logo_256.png"), "nordscribe/assets"),
+    (str(assets / "logo.ico"), "nordscribe/assets"),
+]
 
 # CustomTkinter loads its theme JSON files at runtime.
 datas += copy_metadata("customtkinter")
@@ -51,6 +59,7 @@ exe = EXE(
     a.datas,
     [],
     name="NordScribe",
+    icon=str(assets / "logo.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

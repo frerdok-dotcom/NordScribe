@@ -59,6 +59,7 @@ flowchart TB
 | `src/nordscribe/app.py` | composition | логирование, настройки, главное окно, `main()` |
 | `src/nordscribe/cli.py` | вход | `--version`, `--selftest`, `--selftest-audio` |
 | `src/nordscribe/selftest.py` | диагностика | сценарий `--selftest` |
+| `src/nordscribe/assets/` | ресурсы | `logo.png`, `logo_256.png`, `logo.ico` |
 | `core/models.py` | core | каталог моделей, URL/SHA-256, подписи, маркеры |
 | `core/formatting.py` | core | `format_bytes` |
 | `core/errors.py` | core | иерархия ошибок приложения |
@@ -76,6 +77,7 @@ flowchart TB
 | `ui/transcription_tab.py` | ui | поле текста, кнопки, прогресс |
 | `ui/history_tab.py` | ui | карточки истории, очистка |
 | `ui/model_manager.py` | ui | окно диспетчера моделей |
+| `ui/icon.py` | ui | иконка окна, AppUserModelID, пути к assets |
 | `ui/model_menu.py` | ui | покраска пунктов меню |
 | `ui/widgets.py` | ui | `CopyButton` |
 | `ui/mousewheel.py` | ui | `ScrollController` |
@@ -282,6 +284,7 @@ pyinstaller --noconfirm --clean packaging/NordScribe.spec
 - `whisper`: `collect_all`;
 - `scipy.special`, `scipy.linalg` в hidden imports;
 - `console=False`;
+- `icon` — `src/nordscribe/assets/logo.ico`;
 - FFmpeg и веса не входят в exe.
 
 CI: `.github/workflows/ci.yml` (линтер, формат, типы, тесты на 3.12/3.13).

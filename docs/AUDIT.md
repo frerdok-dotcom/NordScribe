@@ -234,7 +234,7 @@ issue/PR, Dependabot, pre-commit, EditorConfig; CI не проверял фор�
 ruff check src tests          # All checks passed
 ruff format --check src tests # all files already formatted
 mypy                          # Success
-pytest                        # 134 passed
+pytest                        # 139 passed
 python -m nordscribe --version
 python -m nordscribe --selftest
 ```

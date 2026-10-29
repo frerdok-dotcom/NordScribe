@@ -23,6 +23,7 @@ from nordscribe.core.errors import DownloadCancelled
 from nordscribe.core.formatting import format_bytes
 from nordscribe.core.models import ModelSpec
 from nordscribe.services.model_service import ModelService
+from nordscribe.ui.icon import apply_window_icon
 from nordscribe.ui.theme import (
     COLOR_ACCENT,
     COLOR_BLUE,
@@ -72,6 +73,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         self._on_busy_changed = on_busy_changed
         self._on_closed = on_closed
 
+        apply_window_icon(self)
         self._alive = True
         self._downloaded: set[str] = set(service.downloaded())
         self._downloading: str | None = None

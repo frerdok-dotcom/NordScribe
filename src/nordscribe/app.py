@@ -26,9 +26,11 @@ logger = logging.getLogger(__name__)
 def build_window(settings: Settings) -> MainWindow:
     """Create the main window with production services."""
     # Imported lazily: ``nordscribe --version`` and unit tests should not load
-    # CustomTkinter or Tk at all.
+    # CustomTkinter, Tk or the icon toolkit at all.
+    from nordscribe.ui.icon import install_windows_app_id
     from nordscribe.ui.main_window import MainWindow
 
+    install_windows_app_id()
     model_service = ModelService(ModelCache(WHISPER_CACHE_DIR))
     history = TranscriptionHistory()
     return MainWindow(settings, model_service=model_service, history=history)

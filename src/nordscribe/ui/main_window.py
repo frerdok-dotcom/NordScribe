@@ -35,6 +35,7 @@ from nordscribe.services.recorder import (
 from nordscribe.services.transcriber import Transcriber
 from nordscribe.ui.dispatcher import UiDispatcher
 from nordscribe.ui.history_tab import HistoryTab
+from nordscribe.ui.icon import apply_window_icon
 from nordscribe.ui.model_manager import ModelManagerWindow
 from nordscribe.ui.model_menu import apply_menu_item_colors
 from nordscribe.ui.theme import (
@@ -77,6 +78,7 @@ class MainWindow(ctk.CTk):
         self._history = history
         self._shutting_down = False
 
+        apply_window_icon(self)
         self._dispatcher = UiDispatcher(self)
         self._dispatcher.start()
 
