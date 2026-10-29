@@ -1,158 +1,199 @@
 # NordScribe 🎙️
 
-**NordScribe** — десктопное приложение для полностью локальной и конфиденциальной
-транскрибации аудио в текст через OpenAI Whisper.
+[![CI](https://github.com/frerdok-dotcom/NordScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/frerdok-dotcom/NordScribe/actions/workflows/ci.yml)
+
+**NordScribe** — десктопное приложение для полностью локальной и
+конфиденциальной транскрибации аудио в текст через OpenAI Whisper.
+
+![Главное окно](docs/images/main_window.png)
 
 ## ✨ Возможности
 
-- 🔒 **Полная конфиденциальность**: всё считается локально, данные не уходят в сеть.
-- 🎙️ **Транскрибация Whisper**: распознавание речи моделью OpenAI Whisper.
+- 🔒 **Полная конфиденциальность**: аудио и текст не уходят в сеть; скачиваются
+  только веса моделей с публичного хранилища OpenAI.
+- 🎙️ **Whisper**: распознавание речи моделями `tiny` … `large`.
 - 🎤 **Запись с микрофона** с потоковой записью на диск: память не зависит от
-  длительности записи, тишина по краям обрезается автоматически.
-- ⚙️ **Диспетчер моделей**: скачивание и удаление весов прямо из приложения,
-  с честным прогрессом, проверкой контрольной суммы и докачкой при обрыве.
+  длительности, тишина по краям обрезается на лету.
+- ⚙️ **Диспетчер моделей**: скачивание и удаление весов, прогресс, SHA-256,
+  докачка после обрыва.
 - 🟢 **Наглядный выбор модели**: скачанные и отсутствующие модели различаются
-  маркером и цветом пункта меню.
-- ⚡ **Отзывчивый интерфейс**: тяжёлые операции идут в отдельных потоках,
-  модель загружается лениво, UI не подвисает.
-- 📝 **Журнал и настройки**: выбранная модель и размер окна сохраняются,
-  проблемы пишутся в `~/.nordscribe/nordscribe.log`.
+  маркером и цветом.
+- ⚡ **Отзывчивый интерфейс**: модель грузится лениво, тяжёлые операции — в
+  отдельных потоках, Tk обновляется через один диспетчер.
+- 📝 **История и настройки**: SQLite-история, выбранная модель и геометрия окна
+  сохраняются; журнал — `~/.nordscribe/nordscribe.log`.
 
 ## 🛠️ Требования
 
-- Python 3.10+
-- **FFmpeg** — обязателен для сжатых форматов (mp3, m4a).
-  - Windows: сборка с [ffmpeg.org](https://ffmpeg.org/download.html), папку `bin` в `PATH`.
-  - Linux: `sudo apt install ffmpeg`
-  - macOS: `brew install ffmpeg`
-- Для записи с микрофона нужно устройство ввода: при старте приложение
-  само проверяет окружение и предупреждает о проблемах в строке статуса.
+- Python **3.10+** (для сборки exe рекомендуется 3.12).
+- **FFmpeg** — для сжатых форматов (mp3, m4a, ogg, flac):
+  - Windows: сборка с [ffmpeg.org](https://ffmpeg.org/download.html), папка `bin` в `PATH`;
+  - Linux: `sudo apt install ffmpeg`;
+  - macOS: `brew install ffmpeg`.
+- **PortAudio** — для записи с микрофона. На Windows колёса `sounddevice`
+  содержат его; на Linux нужен `libportaudio2`.
+- Микрофон — только для записи; транскрибация файлов работает без него.
 
 ## 🚀 Установка
 
 ```bash
-git clone https://github.com/ВАШ_НИК/nordscribe.git
-cd nordscribe
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# Linux/macOS
-source venv/bin/activate
+git clone https://github.com/frerdok-dotcom/NordScribe.git
+cd NordScribe
 
-pip install -r requirements.txt
+# вариант 1: uv (быстрее)
+uv venv .venv
+uv pip install -e ".[dev]"
+
+# вариант 2: venv + pip
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
+
+`pyproject.toml` — единственный источник зависимостей. Отдельного
+`requirements.txt` больше нет.
 
 ## ▶️ Запуск
 
 ```bash
-python main.py
+python -m nordscribe
 ```
+
+или установленный скрипт:
+
+```bash
+nordscribe
+```
+
+При разработке без установки пакета:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m nordscribe
+```
+
+Проверка версии и диагностический прогон:
+
+```bash
+python -m nordscribe --version
+python -m nordscribe --selftest
+python -m nordscribe --selftest --selftest-audio sample.wav
+```
+
+`--selftest` проверяет импорты, создание главного окна и окружение; с
+`--selftest-audio` дополнительно распознаёт WAV уже скачанной моделью. Коды
+возврата: `0` — успех, `1` — ошибка, `2` — нечего распознавать (нет файла или
+весов). Результат пишется в `~/.nordscribe/nordscribe.log`.
 
 ## 📦 Сборка .exe
 
-Установите PyInstaller и соберите однофайловый exe по готовому `main.spec`:
-
 ```bash
-pip install pyinstaller
-pyinstaller --noconfirm --clean main.spec
+pip install -e ".[build]"
+pyinstaller --noconfirm --clean packaging/NordScribe.spec
 ```
 
-Готовый файл — `dist/NordScribe.exe`. Первый запуск занимает несколько секунд:
-PyInstaller распаковывает зависимости во временный каталог. FFmpeg и веса
-моделей в exe не входят — они по-прежнему нужны в `PATH` и в `~/.cache/whisper`.
+Готовый файл — `dist/NordScribe.exe`. FFmpeg и веса в exe не входят: они
+по-прежнему нужны в `PATH` и в `~/.cache/whisper`. Первый запуск занимает
+несколько секунд: PyInstaller распаковывает зависимости во временный каталог.
 
-Проверка собранного приложения без ручных кликов:
-
-```bash
-dist\NordScribe.exe --selftest
-dist\NordScribe.exe --selftest --selftest-audio sample.wav
-```
-
-`--selftest` проверяет импорт всех слоёв, создание главного окна и проверки
-окружения; с `--selftest-audio` дополнительно распознаёт указанный WAV уже
-скачанной моделью. Код возврата: 0 — успех, 1 — ошибка, 2 — нечего
-распознавать (нет файла или скачанных моделей). Результат пишется в обычный
-журнал `~/.nordscribe/nordscribe.log`.
+Сборка проверяется вручную workflow
+[`.github/workflows/build-windows.yml`](.github/workflows/build-windows.yml).
 
 ## 📁 Структура проекта
 
-Код разделён по слоям: бэкенд ничего не знает о графическом интерфейсе,
-а точка входа только связывает слои между собой.
-
-| Файл | Слой | Отвечает за |
-|---|---|---|
-| `main.py` | точка входа | окно приложения, кнопки, связывание слоёв |
-| `gui_components.py` | UI | окно диспетчера моделей, покраска пунктов меню |
-| `model_labels.py` | UI (чистые функции) | маркеры статуса и очистка подписей моделей |
-| `whisper_worker.py` | аудио | запись с микрофона, владение моделью, распознавание |
-| `download_manager.py` | сеть | адреса и хеши моделей, скачивание с докачкой, кэш |
-| `settings.py` | инфраструктура | настройки и журнал |
-| `preflight.py` | инфраструктура | проверки окружения перед запуском |
-| `history.py` | данные | история транскрибаций в SQLite |
-| `tests/` | тесты | юнит-тесты слоёв (без микрофона, сети и весов) |
-
-Правило зависимостей: `main` → {`gui_components`, `whisper_worker`,
-`download_manager`, `settings`, `preflight`, `history`}; `gui_components` → {`download_manager`,
-`model_labels`}; `whisper_worker` → `download_manager`. Обратных зависимостей нет,
-`customtkinter` не импортируется ни одним бэкенд-модулем.
-
-## ✅ Тесты
-
-```bash
-python -m unittest discover -s tests -t .
+```text
+src/nordscribe/
+├── app.py            # composition root, main()
+├── cli.py            # --version, --selftest
+├── selftest.py       # диагностический сценарий
+├── core/             # каталог моделей, форматирование, ошибки
+├── infra/            # пути, настройки, журнал, SQLite, кэш, SHA-256
+├── services/         # downloader, model_service, recorder, transcriber, preflight
+└── ui/               # theme, dispatcher, widgets, вкладки, окна
+tests/                # unit-тесты + архитектурные тесты
+docs/                 # ARCHITECTURE, AUDIT, CODEGRAPH, ADR
+packaging/            # PyInstaller spec
 ```
 
-Тесты не требуют ни микрофона, ни скачанных весов, ни интернета: входной поток
-звука и модель Whisper подменяются, а скачивание проверяется на локальном
-HTTP-сервере, который умеет отдавать файл целиком, поддерживать докачку,
-игнорировать её и обрывать соединение.
+Слои и зависимости: `core <- infra <- services <- ui`; `app.py` и
+`selftest.py` связывают всё. Подробно — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Проверка качества кода (нужны инструменты из `.[dev]`):
+## ✅ Тесты и качество кода
 
 ```bash
-pip install -e ".[dev]"
-python -m ruff check .
-python -m mypy .
+pytest
+ruff check src tests
+ruff format --check src tests
+mypy
 ```
 
-## ⚙️ Настройки
+CI (`.github/workflows/ci.yml`) запускает эти же команды на Python 3.12 и
+3.13. Тесты не требуют микрофона, весов и интернета: входной поток и загрузчик
+модели подменяются, HTTP проверяется на локальном сервере.
 
-Хранятся в `~/.nordscribe/settings.json`: выбранная модель, язык распознавания,
-размер окна и обрезка тишины.
+Архитектурные тесты (`tests/test_architecture.py`) падают, если:
+- слой импортирует запрещённый слой;
+- `torch`/`whisper`/`sounddevice`/GUI импортируются на уровне модуля вне UI;
+- `import nordscribe.app` тянет тяжёлые зависимости.
 
-История транскрибаций лежит рядом — в `~/.nordscribe/history.db`
-(таблица `transcription_history`). Метки времени SQLite хранит в UTC,
-а показываются они в местном времени. Журнал — `~/.nordscribe/nordscribe.log`
-(ротация по 1 МБ, три файла). Веса моделей лежат там, где их ждёт Whisper:
-`~/.cache/whisper/`.
+## ⚙️ Настройки и данные
+
+| Что | Где |
+|---|---|
+| Настройки | `~/.nordscribe/settings.json` |
+| История | `~/.nordscribe/history.db` (таблица `transcription_history`) |
+| Журнал | `~/.nordscribe/nordscribe.log` (ротация 1 МБ, 3 файла) |
+| Веса Whisper | `~/.cache/whisper` |
+
+Метки времени SQLite хранит в UTC, показываются в местном времени. Настройки
+валидируются по типам и сохраняются атомарно.
 
 ## 📖 Как использовать
 
 1. **Скачать модель**: «⚙ Управление моделями» → «Скачать» напротив нужной.
-   Прогресс, процент и объём показываются в окне диспетчера.
-2. **Транскрибация файла**: «📁 Загрузить аудиофайл» и выбрать запись.
-3. **Запись с микрофона**: «🎤 Записать с микрофона», затем «⏹ Остановить запись» —
-   распознавание начнётся автоматически.
-4. **История**: вкладка «История» в том же окне. Каждая запись — карточка
-   с текстом и временем; поле только для чтения, но текст можно выделять
-   и копировать кнопкой «Копировать 📋».
-5. **Очистка истории**: кнопка «Очистить историю 🗑» во вкладке истории.
-   Удаление необратимо, поэтому первое нажатие только просит подтверждение
-   («Точно очистить?», 5 секунд) — удаляет второе.
+2. **Транскрибация файла**: «📁 Загрузить аудиофайл».
+3. **Запись с микрофона**: «🎤 Записать с микрофона», затем «⏹ Остановить
+   запись» — распознавание начнётся автоматически.
+4. **История**: вкладка «История», карточки с текстом и временем; текст можно
+   выделять и копировать.
+5. **Очистка истории**: первое нажатие просит подтверждение (5 секунд),
+   удаляет второе.
 
-## 📦 Зависимости
+## 🧭 CodeGraph
 
-Перечислены в `requirements.txt`: `customtkinter`, `openai-whisper`,
-`sounddevice`, `numpy`, `scipy`.
+Проект проиндексирован [CodeGraph](https://github.com/colbymchenry/codegraph).
+Для структурных вопросов используйте `codegraph explore "..."` (или MCP-инструмент
+`codegraph_explore`), а не grep/read. Настройка, рецепты и troubleshooting —
+[docs/CODEGRAPH.md](docs/CODEGRAPH.md); готовый системный промпт —
+[docs/codegraph-system-prompt.md](docs/codegraph-system-prompt.md).
+
+```bash
+codegraph status .
+codegraph sync .
+codegraph explore "how does a file reach Whisper?"
+```
 
 ## 🤝 Вклад
 
-Pull Request'ы приветствуются. Перед отправкой прогоните тесты и линтер —
-это же делает CI (`.github/workflows/ci.yml`).
+См. [CONTRIBUTING.md](CONTRIBUTING.md). Перед PR:
+
+```bash
+ruff check src tests
+ruff format --check src tests
+mypy
+pytest
+```
+
+Ветки — от `main`, PR — в `main`, CI должен быть зелёным. История изменений —
+[CHANGELOG.md](CHANGELOG.md).
 
 ## 📄 Лицензия
 
-MIT License.
+MIT License, см. [LICENSE](LICENSE).
 
 ---
-*Разработано с использованием Python и CustomTkinter.*
+
+*Разработано с использованием Python, CustomTkinter и OpenAI Whisper.*

@@ -1,4 +1,22 @@
 {
-    "python.defaultInterpreterPath": "C:\\Users\\fr0oz\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+  "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.autoImportCompletions": true,
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "ruff.nativeServer": "on",
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".mypy_cache": true,
+    ".ruff_cache": true,
+    "tests/_tmp": true
+  }
 }

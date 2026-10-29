@@ -1,0 +1,15 @@
+{
+  "exclude": [
+    ".codegraph/",
+    "dist/",
+    "build/",
+    "venv/",
+    ".venv/",
+    "_pip_tmp/",
+    "_uv_cache/",
+    "torchinductor_fr0oz/",
+    "tests/_tmp/",
+    "tests/pytest-cache-files-*",
+    "docs/images/"
+  ]
+}

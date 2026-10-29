@@ -1,6 +1,51 @@
+# Bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+pytest-cache-files-*/
+
+# Packaging and build artefacts
 build/
 dist/
-tests/_tmp/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
 _pip_tmp/
+_uv_cache/
+_uv_cache*/
+torchinductor_*/
+tests/_tmp/
+tests/pytest-cache-files-*/
+
+# Coverage and reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local application files and logs
+*.log
+*.local
+.env
+.env.*
+!.env.example
+
+# IDE and OS noise
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# CodeGraph stores machine-local data in .codegraph/.gitignore; keep the
+# database and daemon sockets out of the repository as well.
+.codegraph/codegraph.db
+.codegraph/*.pid
+.codegraph/*.sock

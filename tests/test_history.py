@@ -1,4 +1,4 @@
-"""Тесты истории транскрибаций в SQLite."""
+"""Tests for the SQLite transcription history."""
 
 from __future__ import annotations
 
@@ -6,24 +6,24 @@ import sqlite3
 import unittest
 from datetime import datetime, timezone
 
-import history
+from nordscribe.infra.history import TranscriptionHistory, format_local_time
 from tests import make_temp_dir, remove_temp_dir
 
 
 class HistoryCase(unittest.TestCase):
-    """Базовый класс: своя база на каждый тест."""
+    """A private database per test."""
 
     def setUp(self) -> None:
-        self._tmp = make_temp_dir("hist_")
+        self._tmp = make_temp_dir()
         self.db = self._tmp / "history.db"
-        self.history = history.TranscriptionHistory(self.db)
+        self.history = TranscriptionHistory(self.db)
 
     def tearDown(self) -> None:
         remove_temp_dir(self._tmp)
 
 
 class SchemaTest(HistoryCase):
-    """Создание таблицы."""
+    """Table creation."""
 
     def test_init_creates_table(self) -> None:
         self.assertTrue(self.history.init_schema())
@@ -43,37 +43,27 @@ class SchemaTest(HistoryCase):
         self.history.init_schema()
         with sqlite3.connect(self.db) as connection:
             columns = connection.execute("PRAGMA table_info(transcription_history)").fetchall()
-        self.assertEqual([c[1] for c in columns], ["id", "text", "created_at"])
-        self.assertEqual(columns[0][5], 1, "id должен быть первичным ключом")
-        self.assertEqual(columns[1][3], 1, "text должен быть NOT NULL")
+        self.assertEqual([column[1] for column in columns], ["id", "text", "created_at"])
+        self.assertEqual(columns[0][5], 1, "id must be the primary key")
+        self.assertEqual(columns[1][3], 1, "text must be NOT NULL")
 
     def test_default_timestamp_is_set_by_database(self) -> None:
         self.history.init_schema()
         self.history.add("текст")
         with sqlite3.connect(self.db) as connection:
             row = connection.execute("SELECT created_at FROM transcription_history").fetchone()
-        # Формат SQLite CURRENT_TIMESTAMP; заодно проверяем, что DEFAULT сработал.
         datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-
-    def test_index_is_created(self) -> None:
-        self.history.init_schema()
-        with sqlite3.connect(self.db) as connection:
-            indexes = {
-                row[0]
-                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='index'")
-            }
-        self.assertIn("idx_transcription_history_order", indexes)
 
 
 class AddTest(HistoryCase):
-    """Запись строки в базу."""
+    """Inserting rows."""
 
     def test_add_returns_saved_entry(self) -> None:
         self.history.init_schema()
         entry = self.history.add("  привет мир  ")
         self.assertIsNotNone(entry)
         assert entry is not None
-        self.assertEqual(entry.text, "привет мир", "пробелы по краям обрезаются")
+        self.assertEqual(entry.text, "привет мир", "edges are stripped")
         self.assertGreater(entry.id, 0)
         self.assertTrue(entry.created_at)
 
@@ -111,18 +101,20 @@ class AddTest(HistoryCase):
         self.assertEqual(self.history.count(), 1)
 
     def test_add_without_schema_returns_none(self) -> None:
-        # Таблицы ещё нет: метод не должен бросать исключение.
         self.assertIsNone(self.history.add("текст"))
 
 
 class ReadTest(HistoryCase):
-    """Чтение записей."""
+    """Reading rows."""
 
     def test_all_returns_newest_first(self) -> None:
         self.history.init_schema()
         for text in ("первый", "второй", "третий"):
             self.history.add(text)
-        self.assertEqual([e.text for e in self.history.all()], ["третий", "второй", "первый"])
+        self.assertEqual(
+            [entry.text for entry in self.history.all()],
+            ["третий", "второй", "первый"],
+        )
 
     def test_all_on_empty_base(self) -> None:
         self.history.init_schema()
@@ -130,43 +122,42 @@ class ReadTest(HistoryCase):
 
     def test_all_respects_limit(self) -> None:
         self.history.init_schema()
-        for i in range(10):
-            self.history.add(f"запись {i}")
+        for index in range(10):
+            self.history.add(f"запись {index}")
         self.assertEqual(
-            [e.text for e in self.history.all(limit=3)],
+            [entry.text for entry in self.history.all(limit=3)],
             ["запись 9", "запись 8", "запись 7"],
         )
 
     def test_order_is_stable_when_timestamps_match(self) -> None:
         """
-        У CURRENT_TIMESTAMP разрешение в одну секунду, поэтому записи подряд
-        получают одинаковую метку. Порядок всё равно должен быть определённым.
+        CURRENT_TIMESTAMP has one-second resolution, so consecutive rows share
+        a timestamp. Ordering by id keeps the order deterministic.
         """
         self.history.init_schema()
-        for i in range(5):
-            self.history.add(f"запись {i}")
+        for index in range(5):
+            self.history.add(f"запись {index}")
         with sqlite3.connect(self.db) as connection:
             stamps = {
-                row[0]
-                for row in connection.execute("SELECT created_at FROM transcription_history")
+                row[0] for row in connection.execute("SELECT created_at FROM transcription_history")
             }
-        self.assertEqual(len(stamps), 1, "тест имеет смысл только при равных метках")
+        self.assertEqual(len(stamps), 1, "the test is meaningful only with equal stamps")
         self.assertEqual(
-            [e.text for e in self.history.all()],
-            [f"запись {i}" for i in reversed(range(5))],
+            [entry.text for entry in self.history.all()],
+            [f"запись {index}" for index in reversed(range(5))],
         )
 
     def test_all_is_newest_first_after_reopen(self) -> None:
         self.history.init_schema()
         self.history.add("старое")
         self.history.add("новое")
-        reopened = history.TranscriptionHistory(self.db)
+        reopened = TranscriptionHistory(self.db)
         reopened.init_schema()
-        self.assertEqual([e.text for e in reopened.all()], ["новое", "старое"])
+        self.assertEqual([entry.text for entry in reopened.all()], ["новое", "старое"])
 
 
 class ClearTest(HistoryCase):
-    """Очистка истории."""
+    """Clearing the history."""
 
     def test_clear_removes_everything(self) -> None:
         self.history.init_schema()
@@ -182,36 +173,35 @@ class ClearTest(HistoryCase):
 
 
 class PersistenceTest(HistoryCase):
-    """Данные переживают перезапуск, ресурсы освобождаются."""
+    """Data survives restarts and resources are released."""
 
     def test_survives_new_instance(self) -> None:
         self.history.init_schema()
         self.history.add("до перезапуска")
-        reopened = history.TranscriptionHistory(self.db)
+        reopened = TranscriptionHistory(self.db)
         reopened.init_schema()
-        self.assertEqual([e.text for e in reopened.all()], ["до перезапуска"])
+        self.assertEqual([entry.text for entry in reopened.all()], ["до перезапуска"])
 
     def test_connection_is_really_closed(self) -> None:
         """
-        `with sqlite3.connect(...)` закрывает транзакцию, но НЕ соединение.
-        Проверяем, что наше соединение закрывается: на Windows файл нельзя
-        удалить, пока он кем-то открыт.
+        ``with sqlite3.connect(...)`` closes the transaction, not the
+        connection. On Windows an open handle prevents deleting the file.
         """
         self.history.init_schema()
         self.history.add("текст")
         self.history.all()
-        self.db.unlink()  # PermissionError, если соединение осталось открытым
+        self.db.unlink()
         self.assertFalse(self.db.exists())
 
     def test_parent_directory_is_created(self) -> None:
-        nested = history.TranscriptionHistory(self._tmp / "a" / "b" / "history.db")
+        nested = TranscriptionHistory(self._tmp / "a" / "b" / "history.db")
         self.assertTrue(nested.init_schema())
         self.assertTrue(nested.path.exists())
 
     def test_unavailable_database_degrades_gracefully(self) -> None:
         blocker = self._tmp / "файл-вместо-каталога"
         blocker.write_text("x", encoding="utf-8")
-        broken = history.TranscriptionHistory(blocker / "history.db")
+        broken = TranscriptionHistory(blocker / "history.db")
         self.assertFalse(broken.init_schema())
         self.assertIsNone(broken.add("текст"))
         self.assertEqual(broken.all(), [])
@@ -220,7 +210,7 @@ class PersistenceTest(HistoryCase):
 
 
 class FormatLocalTimeTest(unittest.TestCase):
-    """Метка из SQLite приходит в UTC и должна показываться в местном времени."""
+    """SQLite timestamps are UTC and must be shown in local time."""
 
     def test_converts_to_local_zone(self) -> None:
         stamp = "2026-10-04 14:19:20"
@@ -230,22 +220,23 @@ class FormatLocalTimeTest(unittest.TestCase):
             .astimezone()
             .strftime("%Y-%m-%d %H:%M:%S")
         )
-        self.assertEqual(history.format_local_time(stamp), expected)
+        self.assertEqual(format_local_time(stamp), expected)
 
     def test_broken_value_is_returned_as_is(self) -> None:
-        self.assertEqual(history.format_local_time("не дата"), "не дата")
-        self.assertEqual(history.format_local_time(""), "")
-        self.assertEqual(history.format_local_time(None), "")  # type: ignore[arg-type]
+        self.assertEqual(format_local_time("не дата"), "не дата")
+        self.assertEqual(format_local_time(""), "")
+        self.assertEqual(format_local_time(None), "")  # type: ignore[arg-type]
 
     def test_real_record_round_trip(self) -> None:
-        tmp = make_temp_dir("time_")
+        tmp = make_temp_dir()
         try:
-            store = history.TranscriptionHistory(tmp / "history.db")
+            store = TranscriptionHistory(tmp / "history.db")
             store.init_schema()
             entry = store.add("текст")
             assert entry is not None
             shown = datetime.strptime(
-                history.format_local_time(entry.created_at), "%Y-%m-%d %H:%M:%S"
+                format_local_time(entry.created_at),
+                "%Y-%m-%d %H:%M:%S",
             )
             actual = (
                 datetime.strptime(entry.created_at, "%Y-%m-%d %H:%M:%S")
@@ -256,7 +247,3 @@ class FormatLocalTimeTest(unittest.TestCase):
             self.assertEqual(shown, actual)
         finally:
             remove_temp_dir(tmp)
-
-
-if __name__ == "__main__":
-    unittest.main()

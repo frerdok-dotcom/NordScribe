@@ -1,0 +1,62 @@
+name: Bug report
+description: Сообщить об ошибке NordScribe
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Не прикладывайте аудио и текст транскрибации, если они
+        конфиденциальны. Журнал `~/.nordscribe/nordscribe.log` обычно достаточен.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Кратко опишите поведение и что ожидалось.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      placeholder: |
+        1. Открыть ...
+        2. Нажать ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      description: Вывод `python -m nordscribe --version` или версия exe.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: ОС
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Другое
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Журнал / traceback
+      description: Вставьте relevant строки из `~/.nordscribe/nordscribe.log`.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверки
+      options:
+        - label: Я проверил(а), что это не дубликат существующего issue
+          required: true
+        - label: Я удалил(а) из логов конфиденциальные данные
+          required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Документация
+    url: https://github.com/frerdok-dotcom/NordScribe/blob/main/docs/ARCHITECTURE.md
+    about: Архитектура, аудит и правила разработки.
+  - name: Обсуждения
+    url: https://github.com/frerdok-dotcom/NordScribe/discussions
+    about: Вопросы, идеи и обсуждение без оформления issue.

@@ -5,6 +5,13 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -16,40 +23,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Установить Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      # Whisper не читает сжатые форматы без ffmpeg, а sounddevice нужен
-      # приложению и проверкам окружения — без системной библиотеки
-      # PortAudio импорт модуля падает ещё до тестов.
-      - name: Системные зависимости
+      # Whisper needs ffmpeg for compressed formats, and sounddevice needs
+      # PortAudio at import time.
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg libportaudio2 libsndfile1
 
-      # Тяжёлые зависимости (torch тянет openai-whisper) нужны, потому что
-      # download_manager и whisper_worker импортируют whisper на уровне модуля.
-      - name: Зависимости проекта и инструменты разработки
+      - name: Install project and dev tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
           python -m pip install -e ".[dev]"
 
-      - name: Линтер
-        run: python -m ruff check .
+      - name: Lint
+        run: python -m ruff check src tests
 
-      # Форматирование пока не блокирует сборку: правила ruff-format не
-      # проверялись локально, а ронять из-за пробелов CI не хочется.
-      # После первого прогона `ruff format .` шаг можно сделать строгим.
-      - name: Форматирование (необязательно)
-        continue-on-error: true
-        run: python -m ruff format --check .
+      - name: Format check
+        run: python -m ruff format --check src tests
 
-      - name: Типы
-        run: python -m mypy .
+      - name: Type check
+        run: python -m mypy
 
-      - name: Тесты
-        run: python -m pytest -q
+      - name: Tests
+        run: python -m pytest
+
+      - name: Smoke-test the entry point
+        run: python -m nordscribe --version

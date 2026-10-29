@@ -1,14 +1,37 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nordscribe"
-version = "1.0.0"
-description = "Локальная транскрибация аудио через OpenAI Whisper с менеджером моделей"
+dynamic = ["version"]
+description = "Local, private audio transcription with OpenAI Whisper"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "NordScribe contributors" }]
+keywords = [
+    "whisper",
+    "transcription",
+    "speech-to-text",
+    "desktop",
+    "tkinter",
+    "privacy",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
     "customtkinter>=5.2.0",
     "openai-whisper>=20231117",
@@ -22,84 +45,108 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pre-commit>=3.7",
 ]
+build = ["pyinstaller>=6.10"]
 
 [project.scripts]
-nordscribe = "main:main"
+nordscribe = "nordscribe.app:main"
+
+[project.urls]
+Homepage = "https://github.com/frerdok-dotcom/NordScribe"
+Repository = "https://github.com/frerdok-dotcom/NordScribe"
+Issues = "https://github.com/frerdok-dotcom/NordScribe/issues"
+Changelog = "https://github.com/frerdok-dotcom/NordScribe/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-py-modules = [
-    "main",
-    "download_manager",
-    "whisper_worker",
-    "gui_components",
-    "model_labels",
-    "settings",
-    "preflight",
-    "history",
-]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "nordscribe.__version__" }
 
 # ---------------------------------------------------------------------------
-# ruff: линтер и форматирование
+# ruff: linter and formatter
 # ---------------------------------------------------------------------------
 [tool.ruff]
-line-length = 99
+line-length = 100
 target-version = "py310"
-exclude = [".git", ".codegraph", "__pycache__", "tests/_tmp"]
+src = ["src", "tests"]
+extend-exclude = [
+    ".codegraph",
+    ".venv",
+    "build",
+    "dist",
+    "venv",
+    "_pip_tmp",
+    "_uv_cache",
+    "tests/_tmp",
+    "tests/pytest-cache-files-*",
+    "torchinductor_fr0oz",
+]
 
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle errors
     "W",    # pycodestyle warnings
     "F",    # pyflakes
-    "I",    # isort: порядок импортов
+    "I",    # isort
     "UP",   # pyupgrade
     "B",    # flake8-bugbear
     "SIM",  # flake8-simplify
     "C4",   # flake8-comprehensions
-    "RUF",  # правила самого ruff
+    "PTH",  # pathlib
+    "RUF",  # ruff-specific rules
+    "T20",  # no print()
 ]
 ignore = [
-    "E501",   # длину строк контролирует форматтер
-    "B008",   # вызов функции в значении по умолчанию (нужен для dataclass/CLI)
-    "RUF001", # кириллица в строках — это нормально для русскоязычного UI
+    "E501",   # line length is handled by the formatter
+    "B008",   # function call in a default argument
+    "RUF001", # Cyrillic characters are intentional in the UI
     "RUF002",
     "RUF003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# В тестах допустимы длинные строки и «магические» значения.
 "tests/*" = ["E501", "SIM117"]
-# Локальный импорт sounddevice нужен, чтобы проверка не падала без PortAudio.
-"preflight.py" = ["PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nordscribe"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
 # ---------------------------------------------------------------------------
-# mypy: статическая проверка типов
+# mypy: static typing
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
-warn_unused_configs = true
+mypy_path = "src"
+files = ["src", "tests"]
+strict = true
+disallow_subclassing_any = false
+warn_unused_ignores = true
 warn_redundant_casts = true
-warn_unused_ignores = false   # подавления в тестах могут оказаться лишними
-#                                при другой версии библиотек; включим после
-#                                первого прогона mypy в CI
-no_implicit_optional = true
-strict_equality = true
-check_untyped_defs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
 show_error_codes = true
-# Сторонние библиотеки без стабов: whisper, sounddevice, customtkinter.
+pretty = true
 ignore_missing_imports = true
-exclude = ["tests/_tmp"]
+exclude = [
+    "tests/_tmp",
+    "pytest-cache-files-",
+    "_pip_tmp",
+    "_uv_cache",
+    "torchinductor_fr0oz",
+]
+
+[[tool.mypy.overrides]]
+module = ["customtkinter.*", "whisper.*", "sounddevice.*", "torch.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
-# В тестах допустимы частичные аннотации: они проверяют поведение, а не типы.
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
@@ -107,6 +154,21 @@ disallow_incomplete_defs = false
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
+minversion = "8.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q"
+# The cache plugin is disabled: its temporary cache files are blocked by the
+# Windows workspace sandbox and the cache is not needed for CI.
+addopts = "-q --strict-markers -p no:cacheprovider"
+pythonpath = ["src"]
+norecursedirs = [
+    "_tmp",
+    "pytest-cache-files-*",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "_pip_tmp",
+    "_uv_cache",
+    "torchinductor_*",
+]

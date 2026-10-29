@@ -1,4 +1,4 @@
-"""Тесты проверок окружения."""
+"""Tests for environment checks."""
 
 from __future__ import annotations
 
@@ -6,47 +6,56 @@ import dataclasses
 import shutil
 import unittest
 
-import preflight
+from nordscribe.services.preflight import (
+    CheckResult,
+    has_fatal,
+    run_checks,
+    summarize,
+)
 from tests import make_temp_dir, remove_temp_dir
 
 
 class CheckResultTest(unittest.TestCase):
-    """Модель результата проверки."""
+    """The result model."""
 
     def test_defaults_to_non_fatal(self) -> None:
-        result = preflight.CheckResult("тест", True, "ок")
+        result = CheckResult("тест", True, "ок")
         self.assertFalse(result.fatal)
 
     def test_is_immutable(self) -> None:
-        result = preflight.CheckResult("тест", True, "ок")
+        result = CheckResult("тест", True, "ок")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             result.ok = False  # type: ignore[misc]
 
 
 class SummarizeTest(unittest.TestCase):
-    """Сводка проблем для строки статуса."""
+    """Short status messages."""
 
     def test_empty_when_all_ok(self) -> None:
-        results = [preflight.CheckResult("a", True, "ок")]
-        self.assertEqual(preflight.summarize(results), "")
+        self.assertEqual(summarize([CheckResult("a", True, "ок")]), "")
 
     def test_single_problem_is_detailed(self) -> None:
-        results = [preflight.CheckResult("ffmpeg", False, "не найден")]
-        self.assertEqual(preflight.summarize(results), "ffmpeg: не найден")
+        results = [CheckResult("ffmpeg", False, "не найден")]
+        self.assertEqual(summarize(results), "ffmpeg: не найден")
 
     def test_many_problems_are_counted(self) -> None:
         results = [
-            preflight.CheckResult("a", False, "1"),
-            preflight.CheckResult("b", False, "2"),
+            CheckResult("a", False, "1"),
+            CheckResult("b", False, "2"),
         ]
-        summary = preflight.summarize(results)
+        summary = summarize(results)
         self.assertIn("2", summary)
         self.assertIn("a", summary)
         self.assertIn("b", summary)
 
+    def test_has_fatal(self) -> None:
+        self.assertFalse(has_fatal([CheckResult("a", False, "x")]))
+        self.assertTrue(has_fatal([CheckResult("a", False, "x", fatal=True)]))
+        self.assertFalse(has_fatal([CheckResult("a", True, "x", fatal=True)]))
+
 
 class RunChecksTest(unittest.TestCase):
-    """Сами проверки не должны падать и не должны мешать запуску."""
+    """Checks never raise and never block startup."""
 
     def setUp(self) -> None:
         self._tmp = make_temp_dir()
@@ -56,34 +65,27 @@ class RunChecksTest(unittest.TestCase):
         remove_temp_dir(self._tmp)
 
     def test_writable_cache_passes(self) -> None:
-        results = preflight.run_checks(self.cache)
-        cache = next(r for r in results if r.name == "кэш моделей")
+        results = run_checks(self.cache)
+        cache = next(result for result in results if result.name == "кэш моделей")
         self.assertTrue(cache.ok)
         self.assertTrue(self.cache.exists())
 
     def test_unwritable_cache_is_fatal(self) -> None:
         blocker = self._tmp / "файл-вместо-каталога"
         blocker.write_text("x", encoding="utf-8")
-        results = preflight.run_checks(blocker)
-        cache = next(r for r in results if r.name == "кэш моделей")
+        results = run_checks(blocker)
+        cache = next(result for result in results if result.name == "кэш моделей")
         self.assertFalse(cache.ok)
         self.assertTrue(cache.fatal)
 
     def test_all_checks_present(self) -> None:
-        names = {r.name for r in preflight.run_checks(self.cache)}
+        names = {result.name for result in run_checks(self.cache)}
         self.assertEqual(names, {"кэш моделей", "ffmpeg", "микрофон"})
 
     def test_ffmpeg_check_matches_path(self) -> None:
-        results = preflight.run_checks(self.cache)
-        ffmpeg = next(r for r in results if r.name == "ffmpeg")
+        ffmpeg = next(result for result in run_checks(self.cache) if result.name == "ffmpeg")
         self.assertEqual(ffmpeg.ok, shutil.which("ffmpeg") is not None)
 
     def test_run_checks_never_raises(self) -> None:
-        # Каталог внутри несуществующего корня: проверка должна вернуть
-        # результат, а не исключение.
         weird = self._tmp / "a" / "b" / "c"
-        self.assertIsInstance(preflight.run_checks(weird), list)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertIsInstance(run_checks(weird), list)

@@ -1,0 +1,37 @@
+name: Feature request
+description: Предложить улучшение NordScribe
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: Опишите проблему или сценарий, а не только решение.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое решение
+      description: Что должно измениться в поведении или интерфейсе.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Что ещё рассматривали.
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Область
+      options:
+        - label: Транскрибация
+        - label: Запись с микрофона
+        - label: Модели / загрузка
+        - label: История
+        - label: Интерфейс
+        - label: Сборка / инфраструктура

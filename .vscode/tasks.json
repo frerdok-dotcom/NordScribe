@@ -1,0 +1,46 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run NordScribe",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m nordscribe",
+      "options": {
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m pytest",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m ruff check .",
+      "problemMatcher": []
+    },
+    {
+      "label": "Format",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m ruff format .",
+      "problemMatcher": []
+    },
+    {
+      "label": "Type check",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m mypy",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build exe",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m PyInstaller --noconfirm --clean packaging/NordScribe.spec",
+      "problemMatcher": []
+    }
+  ]
+}
